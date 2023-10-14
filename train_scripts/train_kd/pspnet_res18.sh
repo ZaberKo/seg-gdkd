@@ -8,7 +8,7 @@ python -m torch.distributed.launch --nproc_per_node=8 \
     --teacher-pretrained ckpts/deeplabv3_resnet101_citys_best_model.pth \
     --student-pretrained-base ckpts/resnet18-imagenet.pth
 
-torchrun --standalone --nnodes=1 --nproc_per_node=8 \
+OMP_NUM_THREADS=4 torchrun --standalone --nnodes=1 --nproc_per_node=8 \
     train_kd.py \
     --teacher-model deeplabv3 \
     --student-model psp \
@@ -16,7 +16,8 @@ torchrun --standalone --nnodes=1 --nproc_per_node=8 \
     --student-backbone resnet18 \
     --work-dir work_dirs/dist_dv3-r101_psp_r18 \
     --teacher-pretrained ckpts/deeplabv3_resnet101_citys_best_model.pth \
-    --student-pretrained-base ckpts/resnet18-imagenet.pth
+    --student-pretrained-base ckpts/resnet18-imagenet.pth \
+    --kd-method dist
 
 # single GPU test
 python train_kd.py \

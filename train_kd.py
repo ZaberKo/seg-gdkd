@@ -251,7 +251,7 @@ class Trainer(object):
         return self.optimizer.param_groups[0]['lr']
 
     def reduce_tensor(self, tensor):
-        if not dist.is_initialized():
+        if not self.distributed:
             return tensor
 
         if not isinstance(tensor, torch.Tensor):
@@ -392,18 +392,10 @@ class Trainer(object):
                 f"Sample: {i:d}, Validation pixAcc: {pixAcc*100:.3f}, mIoU: {mIoU*100:.3f}")
 
         if self.distributed:
-            sum_total_correct = torch.tensor(
-                self.metric.total_correct).to(self.device)
-            sum_total_label = torch.tensor(
-                self.metric.total_label).to(self.device)
-            sum_total_inter = torch.tensor(
-                self.metric.total_inter).to(self.device)
-            sum_total_union = torch.tensor(
-                self.metric.total_union).to(self.device)
-            sum_total_correct = self.reduce_tensor(sum_total_correct)
-            sum_total_label = self.reduce_tensor(sum_total_label)
-            sum_total_inter = self.reduce_tensor(sum_total_inter)
-            sum_total_union = self.reduce_tensor(sum_total_union)
+            sum_total_correct = self.reduce_tensor(self.metric.total_correct)
+            sum_total_label = self.reduce_tensor(self.metric.total_label)
+            sum_total_inter = self.reduce_tensor(self.metric.total_inter.clone())
+            sum_total_union = self.reduce_tensor(self.metric.total_union.clone())
 
             eps = 2.220446049250313e-16
             pixAcc = (1.0 * sum_total_correct / (eps + sum_total_label)).item()
