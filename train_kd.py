@@ -279,7 +279,7 @@ class Trainer(object):
 
         # for iteration, (images, targets, _) in tqdm(
         #         enumerate(self.train_loader, 1), total=len(self.train_loader)):
-        for iteration, (images, targets, _) in enumerate(self.train_loader, 1)
+        for iteration, (images, targets, _) in enumerate(self.train_loader, 1):
             self.iters = iteration
 
             images = images.to(self.device)
