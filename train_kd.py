@@ -329,7 +329,7 @@ class Trainer(object):
                     train_info = defaultdict(list)
 
                     self.logger.info(
-                        f"Iters: {iteration:d}/{args.max_iterations:d} || Lr: {lr:.6f} "
+                        f"Iters: {iteration:d}/{args.max_iterations:d} || LR: {lr:.6f} "
                         f"|| Task Loss: {task_loss:.4f} || KD Loss: {kd_loss:.4f} "
                         f"|| Cost Time: {cost_time_str} || Estimated Time: {eta_str}"
                     )
