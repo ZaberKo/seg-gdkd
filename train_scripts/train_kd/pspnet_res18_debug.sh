@@ -1,0 +1,12 @@
+python train_kd.py \
+    --teacher-model deeplabv3 \
+    --student-model psp \
+    --teacher-backbone resnet101 \
+    --student-backbone resnet18 \
+    --data data/cityscapes/ \
+    --save-dir work_dirs/dist_dv3-r101_psp_r18 \
+    --log-dir work_dirs/dist_dv3-r101_psp_r18 \
+    --gpu-id 0 \
+    --batch-size 4 \
+    --teacher-pretrained ckpts/deeplabv3_resnet101_citys_best_model.pth \
+    --student-pretrained-base ckpts/resnet18-imagenet.pth
