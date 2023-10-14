@@ -54,7 +54,7 @@ def parse_args():
                         help='dataset directory')
     parser.add_argument('--crop-size', type=int, default=[512, 1024], nargs='+',
                         help='crop image size: [height, width]')
-    parser.add_argument('--workers', '-j', type=int, default=16,
+    parser.add_argument('--workers', '-j', type=int, default=2,
                         metavar='N', help='dataloader threads')
     parser.add_argument('--ignore-label', type=int, default=-1, metavar='N',
                         help='ignore label')
@@ -254,7 +254,7 @@ class Trainer(object):
         if not dist.is_initialized():
             return tensor
 
-        if not issubclass(tensor, torch.Tensor):
+        if not isinstance(tensor, torch.Tensor):
             tensor = torch.tensor(tensor, dtype=self.device)
         rt = tensor.clone()
         dist.all_reduce(rt, op=dist.ReduceOp.SUM)
