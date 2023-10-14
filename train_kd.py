@@ -314,6 +314,9 @@ class Trainer(object):
             train_info['loss_task'].append(task_losses_reduced.item())
             train_info['loss_kd'].append(kd_losses_reduced.item())
 
+            for k, v in self.criterion_kd.train_info.items():
+                train_info[k].append(v.item())
+
             if is_main_process():
                 if iteration % log_per_iters == 0:
                     cost_time_str = str(datetime.timedelta(
@@ -323,8 +326,11 @@ class Trainer(object):
                         (args.max_iterations - iteration)
                     )))
                     lr = self.get_lr()
-                    task_loss = np.array(train_info['loss_task']).mean()
-                    kd_loss = np.array(train_info['loss_kd']).mean()
+                    train_info_mean = {
+                        f"kd/{k}": np.array(v).mean() for k, v in train_info.items()
+                    }
+                    task_loss = train_info_mean['loss_task']
+                    kd_loss = train_info_mean['loss_kd']
                     # reset train_info
                     train_info = defaultdict(list)
 
@@ -334,11 +340,9 @@ class Trainer(object):
                         f"|| Cost Time: {cost_time_str} || Estimated Time: {eta_str}"
                     )
 
-                    wandb.log(dict(
-                        lr=lr,
-                        loss_task=task_loss,
-                        loss_kd=kd_loss
-                    ), step=iteration)
+                    wandb.log(dict(lr=lr, **train_info_mean), step=iteration)
+                    # reset train_info
+                    train_info = defaultdict(list)
 
                 if iteration % save_per_iters == 0 and save_to_disk:
                     save_checkpoint(self.s_model, self.args,
@@ -394,8 +398,10 @@ class Trainer(object):
         if self.distributed:
             sum_total_correct = self.reduce_tensor(self.metric.total_correct)
             sum_total_label = self.reduce_tensor(self.metric.total_label)
-            sum_total_inter = self.reduce_tensor(self.metric.total_inter.clone())
-            sum_total_union = self.reduce_tensor(self.metric.total_union.clone())
+            sum_total_inter = self.reduce_tensor(
+                self.metric.total_inter.clone())
+            sum_total_union = self.reduce_tensor(
+                self.metric.total_union.clone())
 
             eps = 2.220446049250313e-16
             pixAcc = (1.0 * sum_total_correct / (eps + sum_total_label)).item()
