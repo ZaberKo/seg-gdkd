@@ -4,8 +4,9 @@ from dataset.datasets import CSTrainValSet
 from utils.score import SegmentationMetric
 from utils.logger import setup_logger
 from utils.distributed import *
+from utils.config import DictAction
 from models.model_zoo import get_segmentation_model
-from losses.dist_kd import DIST
+from losses.distiller import get_criterion_distiller
 from losses.loss import SegCrossEntropyLoss, CriterionKD, CriterionMiniBatchCrossImagePair
 import torch.nn.functional as F
 import torch.distributed as dist
@@ -21,9 +22,18 @@ import shutil
 import sys
 import math
 
+import numpy as np
+from pathlib import Path
+import wandb
+
+from collections import defaultdict
+
 cur_path = os.path.abspath(os.path.dirname(__file__))
 root_path = os.path.split(cur_path)[0]
 sys.path.append(root_path)
+
+
+cudnn.benchmark = False
 
 
 def parse_args():
@@ -40,7 +50,7 @@ def parse_args():
                         help='backbone name')
     parser.add_argument('--dataset', type=str, default='citys',
                         help='dataset name')
-    parser.add_argument('--data', type=str, default='./dataset/cityscapes/',
+    parser.add_argument('--data', type=str, default='./data/cityscapes/',
                         help='dataset directory')
     parser.add_argument('--crop-size', type=int, default=[512, 1024], nargs='+',
                         help='crop image size: [height, width]')
@@ -65,26 +75,25 @@ def parse_args():
     parser.add_argument('--weight-decay', type=float, default=5e-4, metavar='M',
                         help='w-decay (default: 5e-4)')
 
-    parser.add_argument("--kd-temperature", type=float,
-                        default=1.0, help="logits KD temperature")
-
+    parser.add_argument("--kd-method", type=str, default='dist')
     parser.add_argument("--lambda-kd", type=float,
                         default=1., help="lambda_kd")
 
+    parser.add_argument('--kd-options',
+                        nargs='+',
+                        action=DictAction,
+                        help="key-value pairs of distiller options. eg: KEY=VALUE",
+                        default={}
+                        )
+
     # cuda setting
-    parser.add_argument('--gpu-id', type=str, default='0')
-    parser.add_argument('--no-cuda', action='store_true', default=False,
-                        help='disables CUDA training')
-    parser.add_argument('--local_rank', type=int, default=0)
+    parser.add_argument('--local_rank', type=int)
     # checkpoint and log
     parser.add_argument('--resume', type=str, default=None,
                         help='put the path to resuming file if needed')
-    parser.add_argument('--save-dir', default='~/.torch/models',
-                        help='Directory for saving checkpoint models')
+    parser.add_argument('--work-dir', type=str, default='./work_dirs/debug')
     parser.add_argument('--save-epoch', type=int, default=10,
                         help='save model every checkpoint-epoch')
-    parser.add_argument('--log-dir', default='../runs/logs/',
-                        help='Directory for saving checkpoint models')
     parser.add_argument('--log-iter', type=int, default=10,
                         help='print log every log-iter')
     parser.add_argument('--save-per-iters', type=int, default=400,
@@ -105,15 +114,11 @@ def parse_args():
                         help='run validation every val-epoch')
     parser.add_argument('--skip-val', action='store_true', default=False,
                         help='skip validation during training')
-    args = parser.parse_args()
 
-    num_gpus = int(os.environ["WORLD_SIZE"]
-                   ) if "WORLD_SIZE" in os.environ else 1
-    if num_gpus > 1 and args.local_rank == 0:
-        if not os.path.exists(args.log_dir):
-            os.makedirs(args.log_dir)
-        if not os.path.exists(args.save_dir):
-            os.makedirs(args.save_dir)
+    # wandb_setting
+    parser.add_argument("--wandb-suffix", type=str)
+
+    args = parser.parse_args()
 
     if args.student_backbone.startswith('resnet'):
         args.aux = True
@@ -122,15 +127,23 @@ def parse_args():
     else:
         raise ValueError('no such network')
 
+    args.device = "cuda"
+
     return args
 
 
 class Trainer(object):
     def __init__(self, args):
         self.args = args
-        self.device = torch.device(args.device)
-        self.num_gpus = int(
-            os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
+        self.device = torch.device('cuda', args.local_rank)
+        self.distributed = args.distributed
+        self.world_size = args.world_size
+        self.local_rank = args.local_rank
+
+        self.logger = setup_logger("semantic_segmentation", args.work_dir, get_rank(),
+                                   filename=f'{args.experiment_name}_log.txt')
+        self.logger.info("Using {} GPUs".format(args.world_size))
+        self.logger.info(vars(args))
 
         train_dataset = CSTrainValSet(args.data,
                                       list_path='./dataset/list/cityscapes/train.lst',
@@ -140,11 +153,11 @@ class Trainer(object):
                                     list_path='./dataset/list/cityscapes/val.lst',
                                     crop_size=(1024, 2048), scale=False, mirror=False)
 
-        args.batch_size = args.batch_size // num_gpus
+        train_batch_size = args.batch_size // self.world_size
         train_sampler = make_data_sampler(
             train_dataset, shuffle=True, distributed=args.distributed)
         train_batch_sampler = make_batch_data_sampler(
-            train_sampler, args.batch_size, args.max_iterations)
+            train_sampler, train_batch_size, args.max_iterations)
         val_sampler = make_data_sampler(val_dataset, False, args.distributed)
         val_batch_sampler = make_batch_data_sampler(
             val_sampler, images_per_batch=1)
@@ -156,7 +169,7 @@ class Trainer(object):
 
         self.val_loader = data.DataLoader(dataset=val_dataset,
                                           batch_sampler=val_batch_sampler,
-                                          num_workers=args.workers,
+                                          num_workers=2,
                                           pin_memory=True)
 
         # create network
@@ -169,7 +182,7 @@ class Trainer(object):
                                               pretrained=args.teacher_pretrained,
                                               aux=True,
                                               norm_layer=nn.BatchNorm2d,
-                                              num_class=train_dataset.num_class).to(self.args.local_rank)
+                                              num_class=train_dataset.num_class)
 
         self.s_model = get_segmentation_model(model=args.student_model,
                                               backbone=args.student_backbone,
@@ -178,46 +191,54 @@ class Trainer(object):
                                               pretrained='None',
                                               aux=args.aux,
                                               norm_layer=BatchNorm2d,
-                                              num_class=train_dataset.num_class).to(self.device)
+                                              num_class=train_dataset.num_class)
 
-        for t_n, t_p in self.t_model.named_parameters():
+        self.t_model = self.t_model.to(self.device)
+        self.s_model = self.s_model.to(self.device)
+
+        for t_p in self.t_model.parameters():
             t_p.requires_grad = False
         self.t_model.eval()
         self.s_model.eval()
 
         # resume checkpoint if needed
+        # TODO: check whether functional
         if args.resume:
             if os.path.isfile(args.resume):
                 name, ext = os.path.splitext(args.resume)
                 assert ext == '.pkl' or '.pth', 'Sorry only .pth and .pkl files supported.'
                 print('Resuming training, loading {}...'.format(args.resume))
                 self.s_model.load_state_dict(torch.load(
-                    args.resume, map_location=lambda storage, loc: storage))
+                    args.resume, map_location=self.device))
 
         # create criterion
 
         self.criterion = SegCrossEntropyLoss(
             ignore_index=args.ignore_label).to(self.device)
-        self.criterion_kd = DIST()
-        self.criterion_kd.cuda()
 
-        params_list = nn.ModuleList([])
-        params_list.append(self.s_model)
+        self.criterion_kd = get_criterion_distiller(
+            args.kd_method, **args.kd_options)
+        self.criterion_kd.to(self.device)
 
-        self.optimizer = torch.optim.SGD(params_list.parameters(),
+        # params_list = nn.ModuleList([])
+        # params_list.append(self.s_model)
+
+        self.optimizer = torch.optim.SGD(self.s_model.parameters(),
                                          lr=args.lr,
                                          momentum=args.momentum,
                                          weight_decay=args.weight_decay)
 
         if args.distributed:
-            self.s_model = nn.parallel.DistributedDataParallel(self.s_model,
-                                                               device_ids=[
-                                                                   args.local_rank],
-                                                               output_device=args.local_rank)
+            self.s_model = nn.parallel.DistributedDataParallel(
+                self.s_model, device_ids=[args.local_rank])
 
         # evaluation metrics
         self.metric = SegmentationMetric(train_dataset.num_class)
-        self.best_pred = 0.0
+        self.iters = 0
+        self.best_metrics = dict(
+            pixAcc=0.0,
+            mIoU=0.0
+        )
 
     def adjust_lr(self, base_lr, iter, max_iter, power):
         cur_lr = 1e-4 + (base_lr - 1e-4)*((1-float(iter)/max_iter)**(power))
@@ -226,16 +247,22 @@ class Trainer(object):
 
         return cur_lr
 
+    def get_lr(self):
+        return self.optimizer.param_groups[0]['lr']
+
     def reduce_tensor(self, tensor):
         if not dist.is_initialized():
             return tensor
+
+        if not issubclass(tensor, torch.Tensor):
+            tensor = torch.tensor(tensor, dtype=self.device)
         rt = tensor.clone()
         dist.all_reduce(rt, op=dist.ReduceOp.SUM)
         return rt
 
     def reduce_mean_tensor(self, tensor):
         rt = self.reduce_tensor(tensor)
-        rt /= self.num_gpus
+        rt /= self.world_size
         return rt
 
     def train(self):
@@ -243,12 +270,17 @@ class Trainer(object):
         log_per_iters, val_per_iters = self.args.log_iter, self.args.val_per_iters
         save_per_iters = self.args.save_per_iters
         start_time = time.time()
-        logger.info('Start training, Total Iterations {:d}'.format(
+        self.logger.info('Start training, Total Iterations {:d}'.format(
             args.max_iterations))
 
         self.s_model.train()
-        for iteration, (images, targets, _) in tqdm(enumerate(self.train_loader), total=len(self.train_loader)):
-            iteration = iteration + 1
+
+        train_info = defaultdict(list)
+
+        # for iteration, (images, targets, _) in tqdm(
+        #         enumerate(self.train_loader, 1), total=len(self.train_loader)):
+        for iteration, (images, targets, _) in enumerate(self.train_loader, 1)
+            self.iters = iteration
 
             images = images.to(self.device)
             targets = targets.long().to(self.device)
@@ -259,13 +291,13 @@ class Trainer(object):
             s_outputs = self.s_model(images)
 
             kd_loss = self.args.lambda_kd * \
-                self.criterion_kd(s_outputs[0], t_outputs[0])
+                self.criterion_kd(s_outputs[0], t_outputs[0], targets)
 
             if self.args.aux:
                 task_loss = self.criterion(
                     s_outputs[0], targets) + 0.4 * self.criterion(s_outputs[1], targets)
                 kd_loss += 0.4 * self.args.lambda_kd * \
-                    self.criterion_kd(s_outputs[1], t_outputs[1])
+                    self.criterion_kd(s_outputs[1], t_outputs[1], targets)
             else:
                 task_loss = self.criterion(s_outputs[0], targets)
 
@@ -276,54 +308,72 @@ class Trainer(object):
             losses.backward()
             self.optimizer.step()
 
-            task_losses_reduced = self.reduce_mean_tensor(task_loss)
-            kd_losses_reduced = self.reduce_mean_tensor(kd_loss)
+            task_losses_reduced = self.reduce_mean_tensor(task_loss.detach())
+            kd_losses_reduced = self.reduce_mean_tensor(kd_loss.detach())
 
-            eta_seconds = ((time.time() - start_time) / iteration) * \
-                (args.max_iterations - iteration)
-            eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
+            train_info['loss_task'].append(task_losses_reduced.item())
+            train_info['loss_kd'].append(kd_losses_reduced.item())
 
-            if iteration % log_per_iters == 0 and save_to_disk:
-                logger.info(
-                    "Iters: {:d}/{:d} || Lr: {:.6f} || Task Loss: {:.4f} || KD Loss: {:.4f}"
-                    "|| Cost Time: {} || Estimated Time: {}".format(
-                        iteration, args.max_iterations, self.optimizer.param_groups[0]['lr'], task_losses_reduced.item(
-                        ),
-                        kd_losses_reduced.item(),
-                        str(datetime.timedelta(seconds=int(time.time() - start_time))), eta_string))
+            if is_main_process():
+                if iteration % log_per_iters == 0:
+                    cost_time_str = str(datetime.timedelta(
+                        seconds=int(time.time() - start_time)))
+                    eta_str = str(datetime.timedelta(seconds=int((
+                        (time.time() - start_time) / iteration) *
+                        (args.max_iterations - iteration)
+                    )))
+                    lr = self.get_lr()
+                    task_loss = np.array(train_info['loss_task']).mean()
+                    kd_loss = np.array(train_info['loss_kd']).mean()
+                    # reset train_info
+                    train_info = defaultdict(list)
 
-            if iteration % save_per_iters == 0 and save_to_disk:
-                save_checkpoint(self.s_model, self.args, is_best=False)
+                    self.logger.info(
+                        f"Iters: {iteration:d}/{args.max_iterations:d} || Lr: {lr:.6f} "
+                        f"|| Task Loss: {task_loss:.4f} || KD Loss: {kd_loss:.4f} "
+                        f"|| Cost Time: {cost_time_str} || Estimated Time: {eta_str}"
+                    )
+
+                    wandb.log(dict(
+                        lr=lr,
+                        loss_task=task_loss,
+                        loss_kd=kd_loss
+                    ), step=iteration)
+
+                if iteration % save_per_iters == 0 and save_to_disk:
+                    save_checkpoint(self.s_model, self.args,
+                                    cur_iter=iteration, is_best=False)
 
             if not self.args.skip_val and iteration % val_per_iters == 0:
                 self.validation()
                 self.s_model.train()
 
-        save_checkpoint(self.s_model, self.args, is_best=False)
-        total_training_time = time.time() - start_time
-        total_training_str = str(
-            datetime.timedelta(seconds=total_training_time))
-        logger.info(
-            "Total training time: {} ({:.4f}s / it)".format(
-                total_training_str, total_training_time / args.max_iterations))
+        if is_main_process():
+            save_checkpoint(self.s_model, self.args, is_best=False)
+
+            total_training_time = time.time() - start_time
+            total_training_str = str(
+                datetime.timedelta(seconds=total_training_time))
+            self.logger.info(
+                f"Total training time: {total_training_str} ({total_training_time / args.max_iterations:.4f}s / it)"
+            )
+            self.logger.info(
+                f"Best Val PixACC {self.best_metrics['pixAcc']:.3f}, mIoU: {self.best_metrics['mIoU']:.3f}"
+            )
 
     def validation(self):
-        is_best = False
         self.metric.reset()
-        if self.args.distributed:
-            model = self.s_model.module
-        else:
-            model = self.s_model
-        torch.cuda.empty_cache()  # TODO check if it helps
-        model.eval()
-        logger.info("Start validation, Total sample: {:d}".format(
+
+        torch.cuda.empty_cache()  # TODO: check if it helps
+        self.s_model.eval()
+        self.logger.info("Start validation, Total sample: {:d}".format(
             len(self.val_loader)))
-        for i, (image, target, filename) in enumerate(self.val_loader):
+        for i, (image, target, filename) in enumerate(self.val_loader, 1):
             image = image.to(self.device)
             target = target.to(self.device)
 
             with torch.no_grad():
-                outputs = model(image)
+                outputs = self.s_model(image)
 
             B, H, W = target.size()
             outputs[0] = F.interpolate(
@@ -338,58 +388,58 @@ class Trainer(object):
 
             self.metric.update(full_probs, target)
             pixAcc, mIoU = self.metric.get()
-            logger.info("Sample: {:d}, Validation pixAcc: {:.3f}, mIoU: {:.3f}".format(
-                i + 1, pixAcc, mIoU))
+            self.logger.info(
+                f"Sample: {i:d}, Validation pixAcc: {pixAcc*100:.3f}, mIoU: {mIoU*100:.3f}")
 
-        if self.num_gpus > 1:
+        if self.distributed:
             sum_total_correct = torch.tensor(
-                self.metric.total_correct).cuda().to(args.local_rank)
+                self.metric.total_correct).to(self.device)
             sum_total_label = torch.tensor(
-                self.metric.total_label).cuda().to(args.local_rank)
+                self.metric.total_label).to(self.device)
             sum_total_inter = torch.tensor(
-                self.metric.total_inter).cuda().to(args.local_rank)
+                self.metric.total_inter).to(self.device)
             sum_total_union = torch.tensor(
-                self.metric.total_union).cuda().to(args.local_rank)
+                self.metric.total_union).to(self.device)
             sum_total_correct = self.reduce_tensor(sum_total_correct)
             sum_total_label = self.reduce_tensor(sum_total_label)
             sum_total_inter = self.reduce_tensor(sum_total_inter)
             sum_total_union = self.reduce_tensor(sum_total_union)
 
-            pixAcc = 1.0 * sum_total_correct / \
-                (2.220446049250313e-16 + sum_total_label)
-            IoU = 1.0 * sum_total_inter / \
-                (2.220446049250313e-16 + sum_total_union)
+            eps = 2.220446049250313e-16
+            pixAcc = (1.0 * sum_total_correct / (eps + sum_total_label)).item()
+            IoU = 1.0 * sum_total_inter / (eps + sum_total_union)
             mIoU = IoU.mean().item()
 
-            logger.info("Overall validation pixAcc: {:.3f}, mIoU: {:.3f}".format(
-                pixAcc.item() * 100, mIoU * 100))
+        if is_main_process():
+            self.logger.info(
+                f"Overall validation pixAcc: {pixAcc*100:.3f}, mIoU: {mIoU*100:.3f}")
+            wandb.log(dict(
+                pixAcc=pixAcc,
+                mIoU=mIoU
+            ), step=self.iters)
 
-        new_pred = mIoU
-        if new_pred > self.best_pred:
-            is_best = True
-            self.best_pred = new_pred
-        if (args.distributed is not True) or (args.distributed and args.local_rank == 0):
-            save_checkpoint(self.s_model, self.args, is_best)
+        self.best_metrics['pixAcc'] = max(mIoU, self.best_metrics['pixAcc'])
+
+        if mIoU > self.best_metrics['mIoU']:
+            self.best_metrics['mIoU'] = mIoU
+            if is_main_process():
+                save_checkpoint(self.s_model, self.args,
+                                self.iters, is_best=True)
         synchronize()
 
 
-def save_checkpoint(model, args, is_best=False):
+def save_checkpoint(model, args, cur_iter, is_best=False):
     """Save Checkpoint"""
-    directory = os.path.expanduser(args.save_dir)
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-    filename = 'kd_{}_{}_{}.pth'.format(
-        args.student_model, args.student_backbone, args.dataset)
-    filename = os.path.join(directory, filename)
+    directory = Path(args.work_dir).expanduser()
+
+    filename = directory/f"{args.experiment_name}_iter{cur_iter}.pth"
 
     if args.distributed:
         model = model.module
 
     torch.save(model.state_dict(), filename)
     if is_best:
-        best_filename = 'kd_{}_{}_{}_best_model.pth'.format(
-            args.student_model, args.student_backbone, args.dataset)
-        best_filename = os.path.join(directory, best_filename)
+        best_filename = directory/f"{args.experiment_name}_best_model.pth"
         shutil.copyfile(filename, best_filename)
 
 
@@ -397,27 +447,54 @@ if __name__ == '__main__':
     args = parse_args()
 
     # reference maskrcnn-benchmark
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
-    num_gpus = int(os.environ["WORLD_SIZE"]
-                   ) if "WORLD_SIZE" in os.environ else 1
-    args.num_gpus = num_gpus
-    args.distributed = num_gpus > 1
-    if not args.no_cuda and torch.cuda.is_available():
-        cudnn.benchmark = False
-        args.device = "cuda"
-    else:
-        args.distributed = False
-        args.device = "cpu"
+    args.world_size = int(os.environ.get("WORLD_SIZE", '1'))
+
+    if args.local_rank is None:
+        # support torchrun
+        args.local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+
+    args.distributed = args.world_size > 1
+
     if args.distributed:
-        torch.cuda.set_device(args.local_rank)
         torch.distributed.init_process_group(
             backend="nccl", init_method="env://")
+        torch.cuda.set_device(args.local_rank)
         synchronize()
 
-    logger = setup_logger("semantic_segmentation", args.log_dir, get_rank(), filename='{}_{}_{}_log.txt'.format(
-        args.student_model, args.teacher_backbone, args.student_backbone, args.dataset))
-    logger.info("Using {} GPUs".format(num_gpus))
-    logger.info(args)
+    args.experiment_name = f'{args.kd_method}_{args.student_model}-{args.student_backbone}_{args.teacher_model}-{args.teacher_backbone}'
+
+    if is_main_process():
+        work_dir = Path(args.work_dir).expanduser()
+        if not work_dir.exists():
+            os.makedirs(args.work_dir)
+
+        wandb_name = args.experiment_name
+        wandb_tags = [args.kd_method, f'{args.student_model}-{args.student_backbone}',
+                      f'{args.teacher_model}-{args.teacher_backbone}', 'cityscapes']
+
+        suffix_list = []
+        if args.kd_options is not None:
+            suffix_list = [f"{k}={v}" for k, v in args.kd_options.items()]
+
+        if args.wandb_suffix:
+            suffix_list.append(args.wandb_suffix)
+            wandb_tags.append(args.wandb_suffix)
+
+        if len(suffix_list):
+            suffix_str = ",".join(suffix_list)
+            wandb_name = f'{wandb_name}|{suffix_str}'
+
+        # setup wandb
+        wandb.init(
+            project='semseg_distill',
+            name=wandb_name,
+            group=wandb_name+'_group',
+            config=vars(args),
+            tags=wandb_tags,
+            dir=args.work_dir
+        )
+        wandb.define_metric('pixAcc', summary='max')
+        wandb.define_metric('mIoU', summary='max')
 
     trainer = Trainer(args)
     trainer.train()

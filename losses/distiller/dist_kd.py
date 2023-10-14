@@ -1,4 +1,5 @@
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 def cosine_similarity(x, y, eps=1e-8):
@@ -18,23 +19,22 @@ def intra_class_relation(y_s, y_t):
 
 
 class DIST(nn.Module):
-    def __init__(self, beta=1., gamma=1.):
+    def __init__(self, beta=1.0, gamma=1.0, T=1.0):
         super(DIST, self).__init__()
         self.beta = beta
         self.gamma = gamma
+        self.T = T
 
-    def forward(self, y_s, y_t):
-        assert y_s.ndim in (2, 4)
-        if y_s.ndim == 4:
-            num_classes = y_s.shape[1]
-            y_s = y_s.transpose(1, 3).reshape(-1, num_classes)
-            y_t = y_t.transpose(1, 3).reshape(-1, num_classes)
-        y_s = y_s.softmax(dim=1)
-        y_t = y_t.softmax(dim=1)
-        inter_loss = inter_class_relation(y_s, y_t)
-        intra_loss = intra_class_relation(y_s, y_t)
+    def forward(self, y_s, y_t, target=None):
+        assert y_s.ndim == 4
+
+        num_classes = y_s.shape[1]
+
+        y_s = y_s.permute(0, 2, 3, 1).contiguous().view(-1, num_classes)
+        y_t = y_t.permute(0, 2, 3, 1).contiguous().view(-1, num_classes)
+        p_s = F.softmax(y_s / self.T, dim=1)
+        p_t = F.softmax(y_t / self.T, dim=1)
+        inter_loss = inter_class_relation(p_s, p_t)
+        intra_loss = intra_class_relation(p_s, p_t)
         loss = self.beta * inter_loss + self.gamma * intra_loss
         return loss
-
-
-
