@@ -96,7 +96,7 @@ def parse_args():
                         help='save model every checkpoint-epoch')
     parser.add_argument('--log-iter', type=int, default=10,
                         help='print log every log-iter')
-    parser.add_argument('--save-per-iters', type=int, default=400,
+    parser.add_argument('--save-per-iters', type=int, default=4000,
                         help='per iters to save')
     parser.add_argument('--val-per-iters', type=int, default=400,
                         help='per iters to val')
