@@ -256,10 +256,15 @@ class Trainer(object):
         if not self.distributed:
             return tensor
 
+        is_tensor = True
         if not isinstance(tensor, torch.Tensor):
             tensor = torch.tensor(tensor, dtype=self.device)
+            is_tensor = False
         rt = tensor.clone()
         dist.all_reduce(rt, op=dist.ReduceOp.SUM)
+
+        if not is_tensor:
+            rt = rt.cpu().numpy()
         return rt
 
     def reduce_mean_tensor(self, tensor):
@@ -310,17 +315,20 @@ class Trainer(object):
             losses.backward()
             self.optimizer.step()
 
-            task_losses_reduced = self.reduce_mean_tensor(task_loss.detach())
-            kd_losses_reduced = self.reduce_mean_tensor(kd_loss.detach())
-
-            train_info['loss_task'].append(task_losses_reduced.item())
-            train_info['loss_kd'].append(kd_losses_reduced.item())
+            train_info['loss_task'].append(task_loss.item())
+            train_info['loss_kd'].append(kd_loss.item())
 
             for k, v in self.criterion_kd.train_info.items():
                 train_info[k].append(v.item())
 
-            if is_main_process():
-                if iteration % log_per_iters == 0:
+            if iteration % log_per_iters == 0:
+                train_info_mean = {
+                    f"kd/{k}": self.reduce_mean_tensor(torch.tensor(v, dtype=self.device).mean()).item()
+                    for k, v in train_info.items()
+                }
+                task_loss = train_info_mean['kd/loss_task']
+                kd_loss = train_info_mean['kd/loss_kd']
+                if is_main_process():
                     cost_time_str = str(datetime.timedelta(
                         seconds=int(time.time() - start_time)))
                     eta_str = str(datetime.timedelta(seconds=int((
@@ -328,11 +336,7 @@ class Trainer(object):
                         (args.max_iterations - iteration)
                     )))
                     lr = self.get_lr()
-                    train_info_mean = {
-                        f"kd/{k}": np.array(v).mean() for k, v in train_info.items()
-                    }
-                    task_loss = train_info_mean['loss_task']
-                    kd_loss = train_info_mean['loss_kd']
+
                     # reset train_info
                     train_info = defaultdict(list)
 
@@ -346,7 +350,8 @@ class Trainer(object):
                     # reset train_info
                     train_info = defaultdict(list)
 
-                if iteration % save_per_iters == 0 and save_to_disk:
+            if iteration % save_per_iters == 0 and save_to_disk:
+                if is_main_process():
                     save_checkpoint(self.s_model, self.args,
                                     cur_iter=iteration, is_best=False)
 

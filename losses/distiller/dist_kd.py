@@ -25,6 +25,8 @@ class DIST(nn.Module):
         self.gamma = gamma
         self.T = T
 
+        self.train_info = {}
+
     def forward(self, y_s, y_t, target=None):
         assert y_s.ndim == 4
 
@@ -37,4 +39,10 @@ class DIST(nn.Module):
         inter_loss = inter_class_relation(p_s, p_t)
         intra_loss = intra_class_relation(p_s, p_t)
         loss = self.beta * inter_loss + self.gamma * intra_loss
+
+        self.train_info=dict(
+            loss_inter=inter_loss.detach(),
+            loss_intra=intra_loss.detach(),
+        )
+
         return loss
