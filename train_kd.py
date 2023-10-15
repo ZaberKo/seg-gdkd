@@ -510,7 +510,7 @@ if __name__ == '__main__':
 
         # setup wandb
         wandb.init(
-            project='semseg_distill',
+            project='semseg-distill',
             name=wandb_name,
             group=wandb_name+'_group',
             config=vars(args),
