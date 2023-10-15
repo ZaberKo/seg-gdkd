@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from .utils import kl_div
 from .dist_kd import intra_class_relation
 
+
 def get_masks(logits, k=5, strategy="best"):
     if strategy == "best":
         largest_flag = True
@@ -33,7 +34,7 @@ def cat_mask(t, mask1, mask2):
 
 
 class GDKD(nn.Module):
-    def __init__(self, w0: float = 1.0, w1: float = 1.0, w2: float = 2.0, k: int = 5, T: float = 1.0, mask_magnitude=1000, kl_type="forward"):
+    def __init__(self, w0: float = 1.0, w1: float = 1.0, w2: float = 2.0, k: int = 3, T: float = 1.0, mask_magnitude=1000, kl_type="forward"):
         super().__init__()
         self.w0 = w0
         self.w1 = w1
@@ -102,8 +103,9 @@ class GDKD(nn.Module):
 
         return gdkd_loss
 
+
 class GDKDDIST(GDKD):
-    def __init__(self, dist_intra_weight:float=1.0 , **kwargs):
+    def __init__(self, dist_intra_weight: float = 1.0, **kwargs):
         super().__init__(**kwargs)
         self.dist_intra_weight = dist_intra_weight
 
@@ -159,7 +161,6 @@ class GDKDDIST(GDKD):
         dist_intra_loss = intra_class_relation(p_s, p_t)
 
         loss = gdkd_loss + self.dist_intra_weight * dist_intra_loss
-
 
         self.train_info = dict(
             loss_high=high_loss.detach(),
