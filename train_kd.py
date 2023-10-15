@@ -116,6 +116,7 @@ def parse_args():
 
     # wandb_setting
     parser.add_argument("--wandb-suffix", type=str)
+    parser.add_argument("--wandb-log-model", action="store_true")
 
     args = parser.parse_args()
 
@@ -241,6 +242,9 @@ class Trainer(object):
             pixAcc=0.0,
             mIoU=0.0
         )
+
+        if args.wandb_log_model and is_main_process():
+            wandb.watch(self.s_model, log='all', log_freq=args.log_iter, log_graph=True)
 
     def adjust_lr(self, base_lr, iter, max_iter, power):
         cur_lr = 1e-4 + (base_lr - 1e-4)*((1-float(iter)/max_iter)**(power))
@@ -513,4 +517,6 @@ if __name__ == '__main__':
 
     trainer = Trainer(args)
     trainer.train()
+    if is_main_process():
+        wandb.finish()
     torch.cuda.empty_cache()
