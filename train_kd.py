@@ -300,6 +300,10 @@ class Trainer(object):
         for iteration, (images, targets, _) in enumerate(self.train_loader, 1):
             self.iters = iteration
 
+            if (targets==-1).all():
+                self.logger.error("All targets are -1")
+                break
+
             images = images.to(self.device)
             targets = targets.long().to(self.device)
 
