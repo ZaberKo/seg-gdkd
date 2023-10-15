@@ -348,9 +348,6 @@ class Trainer(object):
                     )))
                     lr = self.get_lr()
 
-                    # reset train_info
-                    train_info = defaultdict(list)
-
                     self.logger.info(
                         f"Iters: {iteration:d}/{args.max_iterations:d} || LR: {lr:.6f} "
                         f"|| Task Loss: {task_loss:.4f} || KD Loss: {kd_loss:.4f} "
