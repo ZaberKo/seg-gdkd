@@ -258,7 +258,7 @@ class Trainer(object):
 
         is_tensor = True
         if not isinstance(tensor, torch.Tensor):
-            tensor = torch.tensor(tensor, dtype=self.device)
+            tensor = torch.tensor(tensor, device=self.device)
             is_tensor = False
         rt = tensor.clone()
         dist.all_reduce(rt, op=dist.ReduceOp.SUM)
