@@ -323,7 +323,7 @@ class Trainer(object):
 
             if iteration % log_per_iters == 0:
                 train_info_mean = {
-                    f"kd/{k}": self.reduce_mean_tensor(torch.tensor(v, dtype=self.device).mean()).item()
+                    f"kd/{k}": self.reduce_mean_tensor(torch.tensor(v, device=self.device).mean()).item()
                     for k, v in train_info.items()
                 }
                 task_loss = train_info_mean['kd/loss_task']
