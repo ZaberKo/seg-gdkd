@@ -83,8 +83,7 @@ def parse_args():
                         nargs='+',
                         action=DictAction,
                         help="key-value pairs of distiller options. eg: KEY=VALUE",
-                        default={}
-                        )
+                        default={})
 
     # cuda setting
     parser.add_argument('--local_rank', type=int)
@@ -126,9 +125,8 @@ def parse_args():
         args.aux = False
     else:
         raise ValueError('no such network')
-    
-    timestamp = time.strftime('%Y%m%d_%H%M%S',
-                                        time.localtime(timestamp.item()))
+
+    timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
     args.work_dir = os.path.join(args.work_dir, timestamp)
 
     args.device = "cuda"
@@ -357,7 +355,8 @@ class Trainer(object):
                 self.s_model.train()
 
         if is_main_process():
-            save_checkpoint(self.s_model, self.args, cur_iter=iteration, is_best=False)
+            save_checkpoint(self.s_model, self.args,
+                            cur_iter=iteration, is_best=False)
 
             total_training_time = time.time() - start_time
             total_training_str = str(
