@@ -43,8 +43,8 @@ class DKD(nn.Module):
 
         h, w = y_s.shape[-2:]
         # [B,C,h,w] -> [B,h,w,C] -> [B*h*w,C]
-        y_s = y_s.permute(0, 2, 3, 1).contiguous().view(-1, num_classes)
-        y_t = y_t.permute(0, 2, 3, 1).contiguous().view(-1, num_classes)
+        y_s = y_s.permute(0, 2, 3, 1).reshape(-1, num_classes)
+        y_t = y_t.permute(0, 2, 3, 1).reshape(-1, num_classes)
         
         # resize target to pred size
         # TODO: fixit
@@ -101,8 +101,8 @@ class DKDDIST(DKD):
 
         h, w = y_s.shape[-2:]
         # [B,C,h,w] -> [B,h,w,C] -> [B*h*w,C]
-        y_s = y_s.permute(0, 2, 3, 1).contiguous().view(-1, num_classes)
-        y_t = y_t.permute(0, 2, 3, 1).contiguous().view(-1, num_classes)
+        y_s = y_s.permute(0, 2, 3, 1).reshape(-1, num_classes)
+        y_t = y_t.permute(0, 2, 3, 1).reshape(-1, num_classes)
         
         # resize target to pred siz
         target = F.interpolate(

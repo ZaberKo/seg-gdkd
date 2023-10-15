@@ -52,8 +52,8 @@ class GDKD(nn.Module):
         num_classes = y_s.shape[1]
 
         # [B,C,h,w] -> [B,h,w,C] -> [B*h*w,C]
-        y_s = y_s.permute(0, 2, 3, 1).contiguous().view(-1, num_classes)
-        y_t = y_t.permute(0, 2, 3, 1).contiguous().view(-1, num_classes)
+        y_s = y_s.permute(0, 2, 3, 1).reshape(-1, num_classes)
+        y_t = y_t.permute(0, 2, 3, 1).reshape(-1, num_classes)
 
         mask_u1, mask_u2 = get_masks(y_t, self.k, strategy='best')
 
@@ -115,8 +115,8 @@ class GDKDDIST(GDKD):
         num_classes = y_s.shape[1]
 
         # [B,C,h,w] -> [B,h,w,C] -> [B*h*w,C]
-        y_s = y_s.permute(0, 2, 3, 1).contiguous().view(-1, num_classes)
-        y_t = y_t.permute(0, 2, 3, 1).contiguous().view(-1, num_classes)
+        y_s = y_s.permute(0, 2, 3, 1).reshape(-1, num_classes)
+        y_t = y_t.permute(0, 2, 3, 1).reshape(-1, num_classes)
 
         mask_u1, mask_u2 = get_masks(y_t, self.k, strategy='best')
 
@@ -166,7 +166,11 @@ class GDKDDIST(GDKD):
             loss_high=high_loss.detach(),
             loss_low_top=low_top_loss.detach(),
             loss_low_other=low_other_loss.detach(),
-            loss_dist_intra=dist_intra_loss.detach()
+            loss_dist_intra=dist_intra_loss.detach(),
+            soft_y_s_max=soft_y_s.detach().max(),
+            soft_t_s_min=soft_y_s.detach().min(),
+            soft_y_t_max=soft_y_t.detach().max(),
+            soft_y_t_min=soft_y_t.detach().min(),
         )
 
         return loss

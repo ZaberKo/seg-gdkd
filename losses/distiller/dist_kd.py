@@ -32,8 +32,8 @@ class DIST(nn.Module):
 
         num_classes = y_s.shape[1]
 
-        y_s = y_s.permute(0, 2, 3, 1).contiguous().view(-1, num_classes)
-        y_t = y_t.permute(0, 2, 3, 1).contiguous().view(-1, num_classes)
+        y_s = y_s.permute(0, 2, 3, 1).reshape(-1, num_classes)
+        y_t = y_t.permute(0, 2, 3, 1).reshape(-1, num_classes)
         p_s = F.softmax(y_s / self.T, dim=1)
         p_t = F.softmax(y_t / self.T, dim=1)
         inter_loss = inter_class_relation(p_s, p_t)

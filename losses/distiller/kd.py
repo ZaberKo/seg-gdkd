@@ -24,8 +24,8 @@ class KD(nn.Module):
         num_classes = y_s.shape[1]
 
         # [B,C,h,w] -> [B,h,w,C] -> [B*h*w,C]
-        y_s = y_s.permute(0, 2, 3, 1).contiguous().view(-1, num_classes)
-        y_t = y_t.permute(0, 2, 3, 1).contiguous().view(-1, num_classes)
+        y_s = y_s.permute(0, 2, 3, 1).reshape(-1, num_classes)
+        y_t = y_t.permute(0, 2, 3, 1).reshape(-1, num_classes)
 
         log_p_s = F.log_softmax(y_s / self.T, dim=1)
         log_p_t = F.log_softmax(y_t / self.T, dim=1)
@@ -45,8 +45,8 @@ class KDDIST(KD):
         num_classes = y_s.shape[1]
 
         # [B,C,h,w] -> [B,h,w,C] -> [B*h*w,C]
-        y_s = y_s.permute(0, 2, 3, 1).contiguous().view(-1, num_classes)
-        y_t = y_t.permute(0, 2, 3, 1).contiguous().view(-1, num_classes)
+        y_s = y_s.permute(0, 2, 3, 1).reshape(-1, num_classes)
+        y_t = y_t.permute(0, 2, 3, 1).reshape(-1, num_classes)
 
         soft_y_s = y_s / self.T
         soft_y_t = y_t / self.T
