@@ -126,6 +126,10 @@ def parse_args():
         args.aux = False
     else:
         raise ValueError('no such network')
+    
+    timestamp = time.strftime('%Y%m%d_%H%M%S',
+                                        time.localtime(timestamp.item()))
+    args.work_dir = os.path.join(args.work_dir, timestamp)
 
     args.device = "cuda"
 
@@ -353,7 +357,7 @@ class Trainer(object):
                 self.s_model.train()
 
         if is_main_process():
-            save_checkpoint(self.s_model, self.args, is_best=False)
+            save_checkpoint(self.s_model, self.args, cur_iter=iteration, is_best=False)
 
             total_training_time = time.time() - start_time
             total_training_str = str(
@@ -435,7 +439,9 @@ def save_checkpoint(model, args, cur_iter, is_best=False):
     if args.distributed:
         model = model.module
 
-    torch.save(model.state_dict(), filename)
+    if not filename.exists():
+        torch.save(model.state_dict(), filename)
+
     if is_best:
         best_filename = directory/f"{args.experiment_name}_best_model.pth"
         shutil.copyfile(filename, best_filename)
