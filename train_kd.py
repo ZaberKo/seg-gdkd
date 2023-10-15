@@ -329,8 +329,8 @@ class Trainer(object):
                     f"kd/{k}": self.reduce_mean_tensor(torch.tensor(v, device=self.device).mean()).item()
                     for k, v in train_info.items()
                 }
-                task_loss = train_info_mean['kd/loss_task']
-                kd_loss = train_info_mean['kd/loss_kd']
+                task_loss = train_info_mean.pop('kd/loss_task')
+                kd_loss = train_info_mean.pop('kd/loss_kd')
                 if is_main_process():
                     cost_time_str = str(datetime.timedelta(
                         seconds=int(time.time() - start_time)))
@@ -349,7 +349,11 @@ class Trainer(object):
                         f"|| Cost Time: {cost_time_str} || Estimated Time: {eta_str}"
                     )
 
-                    wandb.log(dict(lr=lr, **train_info_mean), step=iteration)
+                    wandb.log(dict(
+                        lr=lr,
+                        loss_task=task_loss,
+                        loss_kd=kd_loss,
+                        **train_info_mean), step=iteration)
                     # reset train_info
                     train_info = defaultdict(list)
 
