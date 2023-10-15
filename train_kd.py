@@ -244,7 +244,11 @@ class Trainer(object):
         )
 
         if args.wandb_log_model and is_main_process():
-            wandb.watch(self.s_model, log='all', log_freq=args.log_iter, log_graph=True)
+            if self.distributed:
+                model = self.s_model.module
+            else:
+                model = self.s_model
+            wandb.watch(model, log='all', log_freq=args.log_iter, log_graph=True)
 
     def adjust_lr(self, base_lr, iter, max_iter, power):
         cur_lr = 1e-4 + (base_lr - 1e-4)*((1-float(iter)/max_iter)**(power))

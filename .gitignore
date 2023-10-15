@@ -122,4 +122,4 @@ data
 
 work_dirs/
 train_scripts/scripts/
-debug.py
+debug/
