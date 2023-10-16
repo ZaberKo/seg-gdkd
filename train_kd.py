@@ -156,7 +156,7 @@ class Trainer(object):
                                     list_path='./dataset/list/cityscapes/val.lst',
                                     crop_size=(1024, 2048), scale=False, mirror=False)
 
-        train_batch_size = args.batch_size // self.world_size
+        train_batch_size = args.batch_size // args.world_size
         train_sampler = make_data_sampler(
             train_dataset, shuffle=True, distributed=args.distributed)
         train_batch_sampler = make_batch_data_sampler(
@@ -435,18 +435,19 @@ class Trainer(object):
         if is_main_process():
             self.logger.info(
                 f"Overall validation pixAcc: {pixAcc*100:.3f}, mIoU: {mIoU*100:.3f}")
+            
+            self.best_metrics['pixAcc'] = max(mIoU, self.best_metrics['pixAcc'])
+            if mIoU > self.best_metrics['mIoU']:
+                self.best_metrics['mIoU'] = mIoU
+                save_checkpoint(self.s_model, self.args,
+                                    self.iters, is_best=True)
             wandb.log(dict(
                 pixAcc=pixAcc,
-                mIoU=mIoU
+                best_pixAcc=self.best_metrics['pixAcc'],
+                mIoU=mIoU,
+                best_mIoU=self.best_metrics['mIoU']
             ), step=self.iters)
 
-        self.best_metrics['pixAcc'] = max(mIoU, self.best_metrics['pixAcc'])
-
-        if mIoU > self.best_metrics['mIoU']:
-            self.best_metrics['mIoU'] = mIoU
-            if is_main_process():
-                save_checkpoint(self.s_model, self.args,
-                                self.iters, is_best=True)
         synchronize()
 
 
@@ -517,8 +518,8 @@ if __name__ == '__main__':
             tags=wandb_tags,
             dir=args.work_dir
         )
-        wandb.define_metric('pixAcc', summary='max')
-        wandb.define_metric('mIoU', summary='max')
+        # wandb.define_metric('pixAcc', summary='max')
+        # wandb.define_metric('mIoU', summary='max')
 
     trainer = Trainer(args)
     trainer.train()
