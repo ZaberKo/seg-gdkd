@@ -337,13 +337,15 @@ class Trainer(object):
                 train_info[k].append(v.item())
 
             if iteration % log_per_iters == 0:
-                train_info_mean = {
+                train_info_smooth = {
                     f"kd/{k}": self.reduce_mean_tensor(torch.tensor(v, device=self.device).mean()).item()
                     for k, v in train_info.items()
                 }
-                task_loss = train_info_mean.pop('kd/loss_task')
-                kd_loss = train_info_mean.pop('kd/loss_kd')
+
                 if is_main_process():
+                    task_loss_smooth = train_info_smooth.pop('kd/loss_task')
+                    kd_loss_smooth = train_info_smooth.pop('kd/loss_kd')
+                    
                     cost_time_str = str(datetime.timedelta(
                         seconds=int(time.time() - start_time)))
                     eta_str = str(datetime.timedelta(seconds=int((
@@ -354,17 +356,18 @@ class Trainer(object):
 
                     self.logger.info(
                         f"Iters: {iteration:d}/{args.max_iterations:d} || LR: {lr:.6f} "
-                        f"|| Task Loss: {task_loss:.4f} || KD Loss: {kd_loss:.4f} "
+                        f"|| Task Loss: {task_loss_smooth:.4f} || KD Loss: {kd_loss_smooth:.4f} "
                         f"|| Cost Time: {cost_time_str} || Estimated Time: {eta_str}"
                     )
 
                     wandb.log(dict(
                         lr=lr,
-                        loss_task=task_loss,
-                        loss_kd=kd_loss,
-                        **train_info_mean), step=iteration)
-                    # reset train_info
-                    train_info = defaultdict(list)
+                        loss_task=task_loss_smooth,
+                        loss_kd=kd_loss_smooth,
+                        **train_info_smooth), step=iteration)
+                
+                # reset train_info for all workers
+                train_info = defaultdict(list)
 
             if iteration % save_per_iters == 0 and save_to_disk:
                 if is_main_process():
