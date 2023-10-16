@@ -100,13 +100,13 @@ class GDKD(nn.Module):
             loss_low_top=low_top_loss.detach(),
             loss_low_other=low_other_loss.detach(),
             soft_y_s_max=soft_y_s.detach().max(),
-            soft_y_s_max_mean=soft_y_s.detach().max(1).mean(),
+            soft_y_s_max_mean=soft_y_s.detach().max(1)[0].mean(),
             soft_t_s_min=soft_y_s.detach().min(),
-            soft_t_s_min_mean=soft_y_s.detach().min(1).mean(),
+            soft_t_s_min_mean=soft_y_s.detach().min(1)[0].mean(),
             soft_y_t_max=soft_y_t.detach().max(),
-            soft_y_t_max_mean=soft_y_t.detach().max(1).mean(),
+            soft_y_t_max_mean=soft_y_t.detach().max(1)[0].mean(),
             soft_y_t_min=soft_y_t.detach().min(),
-            soft_y_t_min_mean=soft_y_t.detach().min(1).mean(),
+            soft_y_t_min_mean=soft_y_t.detach().min(1)[0].mean(),
         )
 
         return gdkd_loss
@@ -176,13 +176,13 @@ class GDKDDIST(GDKD):
             loss_low_other=low_other_loss.detach(),
             loss_dist_intra=dist_intra_loss.detach(),
             soft_y_s_max=soft_y_s.detach().max(),
-            soft_y_s_max_mean=soft_y_s.detach().max(1).mean(),
+            soft_y_s_max_mean=soft_y_s.detach().max(1)[0].mean(),
             soft_t_s_min=soft_y_s.detach().min(),
-            soft_t_s_min_mean=soft_y_s.detach().min(1).mean(),
+            soft_t_s_min_mean=soft_y_s.detach().min(1)[0].mean(),
             soft_y_t_max=soft_y_t.detach().max(),
-            soft_y_t_max_mean=soft_y_t.detach().max(1).mean(),
+            soft_y_t_max_mean=soft_y_t.detach().max(1)[0].mean(),
             soft_y_t_min=soft_y_t.detach().min(),
-            soft_y_t_min_mean=soft_y_t.detach().min(1).mean(),
+            soft_y_t_min_mean=soft_y_t.detach().min(1)[0].mean(),
         )
 
         return loss
