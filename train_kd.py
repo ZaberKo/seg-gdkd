@@ -248,7 +248,8 @@ class Trainer(object):
                 model = self.s_model.module
             else:
                 model = self.s_model
-            wandb.watch(model, log='all', log_freq=args.log_iter, log_graph=True)
+            wandb.watch(model, log='all',
+                        log_freq=args.log_iter, log_graph=True)
 
     def adjust_lr(self, base_lr, iter, max_iter, power):
         cur_lr = 1e-4 + (base_lr - 1e-4)*((1-float(iter)/max_iter)**(power))
@@ -266,7 +267,7 @@ class Trainer(object):
 
         is_tensor = True
         if not isinstance(tensor, torch.Tensor):
-            rt = torch.tensor(tensor, device=self.device)
+            rt = torch.tensor(tensor, dtype=torch.float64, device=self.device)
             is_tensor = False
         elif tensor.device != self.device:
             rt = tensor.to(self.device)
@@ -300,9 +301,9 @@ class Trainer(object):
         for iteration, (images, targets, _) in enumerate(self.train_loader, 1):
             self.iters = iteration
 
-            if (targets==-1).all():
-                self.logger.error("All targets are -1")
-                break
+            # if (targets == -1).all():
+            #     self.logger.error("All targets are -1")
+            #     break
 
             images = images.to(self.device)
             targets = targets.long().to(self.device)
@@ -338,21 +339,24 @@ class Trainer(object):
 
             if iteration % log_per_iters == 0:
                 train_info_smooth = {
-                    f"kd/{k}": self.reduce_mean_tensor(torch.tensor(v, device=self.device).mean()).item()
+                    f"kd/{k}": self.reduce_mean_tensor(
+                        torch.tensor(
+                            v, dtype=torch.float64, device=self.device
+                        ).mean()).item()
                     for k, v in train_info.items()
                 }
 
                 if is_main_process():
                     task_loss_smooth = train_info_smooth.pop('kd/loss_task')
                     kd_loss_smooth = train_info_smooth.pop('kd/loss_kd')
-                    
+
                     cost_time_str = str(datetime.timedelta(
                         seconds=int(time.time() - start_time)))
                     eta_str = str(datetime.timedelta(seconds=int((
                         (time.time() - start_time) / iteration) *
                         (args.max_iterations - iteration)
                     )))
-                    lr = self.get_lr()
+                    # lr = self.get_lr()
 
                     self.logger.info(
                         f"Iters: {iteration:d}/{args.max_iterations:d} || LR: {lr:.6f} "
@@ -365,7 +369,7 @@ class Trainer(object):
                         loss_task=task_loss_smooth,
                         loss_kd=kd_loss_smooth,
                         **train_info_smooth), step=iteration)
-                
+
                 # reset train_info for all workers
                 train_info = defaultdict(list)
 
@@ -438,12 +442,13 @@ class Trainer(object):
         if is_main_process():
             self.logger.info(
                 f"Overall validation pixAcc: {pixAcc*100:.3f}, mIoU: {mIoU*100:.3f}")
-            
-            self.best_metrics['pixAcc'] = max(mIoU, self.best_metrics['pixAcc'])
+
+            self.best_metrics['pixAcc'] = max(
+                mIoU, self.best_metrics['pixAcc'])
             if mIoU > self.best_metrics['mIoU']:
                 self.best_metrics['mIoU'] = mIoU
                 save_checkpoint(self.s_model, self.args,
-                                    self.iters, is_best=True)
+                                self.iters, is_best=True)
             wandb.log(dict(
                 pixAcc=pixAcc,
                 best_pixAcc=self.best_metrics['pixAcc'],

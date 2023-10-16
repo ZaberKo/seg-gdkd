@@ -39,51 +39,65 @@ class DKD(nn.Module):
     def forward(self, y_s, y_t, target):
         assert y_s.ndim == 4
 
-        num_classes = y_s.shape[1]
-
-        h, w = y_s.shape[-2:]
+        num_classes, h, w = y_s.shape[1:]
         # [B,C,h,w] -> [B,h,w,C] -> [B*h*w,C]
         y_s = y_s.permute(0, 2, 3, 1).reshape(-1, num_classes)
         y_t = y_t.permute(0, 2, 3, 1).reshape(-1, num_classes)
-        
-        # resize target to pred size
-        # TODO: fixit
+
+        # resize target to pred size (use nearest?)
         target = F.interpolate(
             target.float().unsqueeze(1), (h, w), mode='nearest').squeeze(1)
-        target = target.long().flatten()
+        target = target.long().flatten()  # [B*h*w]
 
-        gt_mask = _get_gt_mask(y_t, target)
-        other_mask = _get_other_mask(y_t, target)
+        # move target -1 to 0, then use mask
+        ingore_mask = target == -1  # [B*h*w]
+        target[ingore_mask] = 0
+        num_valid = ingore_mask.shape[0] - ingore_mask.sum()  # keep as tensor
+        # accum_batch_size = ingore_mask.shape[0]
 
-        soft_y_s = y_s / self.T
-        soft_y_t = y_t / self.T
+        if num_valid > 0:
+            gt_mask = _get_gt_mask(y_t, target)
+            other_mask = _get_other_mask(y_t, target)
 
-        p_s = F.softmax(soft_y_s, dim=1)
-        p_t = F.softmax(soft_y_t, dim=1)
-        p0_s = cat_mask(p_s, gt_mask, other_mask)
-        p0_t = cat_mask(p_t, gt_mask, other_mask)
+            soft_y_s = y_s / self.T
+            soft_y_t = y_t / self.T
 
-        log_p0_s = torch.log(p0_s)
-        tckd_loss = (
-            F.kl_div(log_p0_s, p0_t, reduction="batchmean")
-            * (self.T**2)
-        )
+            p_s = F.softmax(soft_y_s, dim=1)
+            p_t = F.softmax(soft_y_t, dim=1)
+            p0_s = cat_mask(p_s, gt_mask, other_mask)
+            p0_t = cat_mask(p_t, gt_mask, other_mask)
 
-        log_p2_s = F.log_softmax(
-            soft_y_s - self.mask_magnitude * gt_mask, dim=1
-        )
-        log_p2_t = F.log_softmax(
-            soft_y_t - self.mask_magnitude * gt_mask, dim=1
-        )
+            log_p0_s = torch.log(p0_s)
+            tckd_loss = (
+                (F.kl_div(log_p0_s, p0_t, reduction="none")
+                 * ingore_mask.unsqueeze(1)).sum()
+                / num_valid
+                * (self.T**2)
+            )
 
-        nckd_loss = kl_div(log_p2_s,
-                           log_p2_t, self.T, kl_type=self.kl_type)
+            log_p2_s = F.log_softmax(
+                soft_y_s - self.mask_magnitude * gt_mask, dim=1
+            )
+            log_p2_t = F.log_softmax(
+                soft_y_t - self.mask_magnitude * gt_mask, dim=1
+            )
+
+            nckd_loss = (kl_div(log_p2_s,
+                                log_p2_t,
+                                self.T,
+                                kl_type=self.kl_type,
+                                reduction="none"
+                                )*ingore_mask).sum() / num_valid
+        else:
+            tckd_loss = 0.0 * y_s.sum()
+            nckd_loss = 0.0 * y_s.sum()
 
         dkd_loss = self.alpha * tckd_loss + self.beta * nckd_loss
 
         self.train_info = dict(
             loss_tckd=tckd_loss.detach(),
-            loss_nckd=nckd_loss.detach()
+            loss_nckd=nckd_loss.detach(),
+            num_valid=num_valid.detach()
         )
 
         return dkd_loss
@@ -97,45 +111,58 @@ class DKDDIST(DKD):
     def forward(self, y_s, y_t, target):
         assert y_s.ndim == 4
 
-        num_classes = y_s.shape[1]
-
-        h, w = y_s.shape[-2:]
+        num_classes, h, w = y_s.shape[1:]
         # [B,C,h,w] -> [B,h,w,C] -> [B*h*w,C]
         y_s = y_s.permute(0, 2, 3, 1).reshape(-1, num_classes)
         y_t = y_t.permute(0, 2, 3, 1).reshape(-1, num_classes)
-        
-        # resize target to pred siz
+
+        # resize target to pred size (use nearest?)
         target = F.interpolate(
             target.float().unsqueeze(1), (h, w), mode='nearest').squeeze(1)
-        target = target.long().flatten()
+        target = target.long().flatten()  # [B*h*w]
 
-        gt_mask = _get_gt_mask(y_t, target)
-        other_mask = _get_other_mask(y_t, target)
+        # move target -1 to 0, then use mask
+        ingore_mask = target == -1  # [B*h*w]
+        target[ingore_mask] = 0
+        num_valid = ingore_mask.shape[0] - ingore_mask.sum()  # keep as tensor
+        # accum_batch_size = ingore_mask.shape[0]
 
-        soft_y_s = y_s / self.T
-        soft_y_t = y_t / self.T
+        if num_valid > 0:
+            gt_mask = _get_gt_mask(y_t, target)
+            other_mask = _get_other_mask(y_t, target)
 
-        p_s = F.softmax(soft_y_s, dim=1)
-        p_t = F.softmax(soft_y_t, dim=1)
+            soft_y_s = y_s / self.T
+            soft_y_t = y_t / self.T
 
-        p0_s = cat_mask(p_s, gt_mask, other_mask)
-        p0_t = cat_mask(p_t, gt_mask, other_mask)
+            p_s = F.softmax(soft_y_s, dim=1)
+            p_t = F.softmax(soft_y_t, dim=1)
+            p0_s = cat_mask(p_s, gt_mask, other_mask)
+            p0_t = cat_mask(p_t, gt_mask, other_mask)
 
-        log_p0_s = torch.log(p0_s)
-        tckd_loss = (
-            F.kl_div(log_p0_s, p0_t, reduction="batchmean")
-            * (self.T**2)
-        )
+            log_p0_s = torch.log(p0_s)
+            tckd_loss = (
+                (F.kl_div(log_p0_s, p0_t, reduction="none")
+                 * ingore_mask.unsqueeze(1)).sum()
+                / num_valid
+                * (self.T**2)
+            )
 
-        log_p2_s = F.log_softmax(
-            soft_y_s - self.mask_magnitude * gt_mask, dim=1
-        )
-        log_p2_t = F.log_softmax(
-            soft_y_t - self.mask_magnitude * gt_mask, dim=1
-        )
+            log_p2_s = F.log_softmax(
+                soft_y_s - self.mask_magnitude * gt_mask, dim=1
+            )
+            log_p2_t = F.log_softmax(
+                soft_y_t - self.mask_magnitude * gt_mask, dim=1
+            )
 
-        nckd_loss = kl_div(log_p2_s,
-                           log_p2_t, self.T, kl_type=self.kl_type)
+            nckd_loss = (kl_div(log_p2_s,
+                                log_p2_t,
+                                self.T,
+                                kl_type=self.kl_type,
+                                reduction="none"
+                                )*ingore_mask).sum() / num_valid
+        else:
+            tckd_loss = 0.0 * y_s.sum()
+            nckd_loss = 0.0 * y_s.sum()
 
         dkd_loss = self.alpha * tckd_loss + self.beta * nckd_loss
 
@@ -146,6 +173,7 @@ class DKDDIST(DKD):
         self.train_info = dict(
             loss_tckd=tckd_loss.detach(),
             loss_nckd=nckd_loss.detach(),
+            num_valid=num_valid.detach(),
             loss_dist_intra=dist_intra_loss.detach()
         )
 
