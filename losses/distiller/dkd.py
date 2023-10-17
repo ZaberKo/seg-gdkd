@@ -85,12 +85,10 @@ class DKD(nn.Module):
                 soft_y_t - self.mask_magnitude * gt_mask, dim=1
             )
 
-            nckd_loss = (kl_div(log_p2_s,
-                                log_p2_t,
-                                self.T,
-                                kl_type=self.kl_type,
-                                reduction="none"
-                                )*valid_mask).sum() / num_valid
+            nckd_loss = (
+                kl_div(log_p2_s, log_p2_t, self.T, kl_type=self.kl_type,
+                       reduction="none")*valid_mask
+            ).sum() / num_valid
         else:
             tckd_loss = 0.0 * y_s.sum()
             nckd_loss = 0.0 * y_s.sum()
@@ -110,7 +108,7 @@ class DKD(nn.Module):
 
             self.train_info.update(
                 dict(loss_dist_intra=dist_intra_loss.detach())
-            )            
+            )
 
         return loss
 
