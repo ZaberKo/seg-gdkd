@@ -366,6 +366,7 @@ class Trainer(object):
 
                     wandb.log(dict(
                         lr=lr,
+                        iter=iteration,
                         loss_task=task_loss_smooth,
                         loss_kd=kd_loss_smooth,
                         **train_info_smooth), step=iteration)
