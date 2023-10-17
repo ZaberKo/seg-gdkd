@@ -40,6 +40,7 @@ class KD(nn.Module):
         if self.ignore_index:
             target = F.interpolate(
                 target.float().unsqueeze(1), (h, w), mode='nearest').squeeze(1)
+            target = target.long().flatten()  # [B*h*w]
             valid_mask = (target != self.ignore_index)
             num_valid = valid_mask.sum()
             # loss = kl_div(log_p_s, log_p_t, self.T, valid_mask, kl_type=self.kl_type)

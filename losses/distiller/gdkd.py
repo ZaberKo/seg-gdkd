@@ -207,6 +207,7 @@ class GDKD(nn.Module):
         if self.ignore_index:
             target = F.interpolate(
                 target.float().unsqueeze(1), (h, w), mode='nearest').squeeze(1)
+            target = target.long().flatten()  # [B*h*w]
             valid_mask = (target != self.ignore_index)
             loss, self.train_info, p_s, p_t = _gdkd_loss_fn2(
                 y_s=y_s,
