@@ -74,9 +74,11 @@ def parse_args():
                         help='momentum (default: 0.9)')
     parser.add_argument('--weight-decay', type=float, default=5e-4, metavar='M',
                         help='w-decay (default: 5e-4)')
+    parser.add_argument('--grad-clip', type=float)
+    parser.add_argument('--grad-clip-norm', type=float)
 
-    parser.add_argument("--kd-method", type=str, default='dist')
-    parser.add_argument("--lambda-kd", type=float,
+    parser.add_argument('--kd-method', type=str, default='dist')
+    parser.add_argument('--lambda-kd', type=float,
                         default=1., help="lambda_kd")
 
     parser.add_argument('--kd-options',
@@ -329,6 +331,14 @@ class Trainer(object):
                                 max_iter=args.max_iterations, power=0.9)
             self.optimizer.zero_grad()
             losses.backward()
+
+            if args.grad_clip_norm is not None:
+                nn.utils.clip_grad_norm_(self.s_model.parameters(),
+                                         max_norm=args.grad_clip_norm, norm_type=2)
+            if args.grad_clip is not None:
+                nn.utils.clip_grad_value_(self.s_model.parameters(),
+                                          clip_value=args.grad_clip)
+
             self.optimizer.step()
 
             train_info['loss_task'].append(task_loss.item())

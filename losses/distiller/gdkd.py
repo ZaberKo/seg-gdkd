@@ -125,10 +125,17 @@ def _gdkd_loss_fn2(y_s, y_t, valid_mask, w0, w1, w2, k, T, mask_magnitude, kl_ty
             soft_y_t - mask_magnitude * mask_u2, dim=1
         )
 
+        # low_top_loss = (
+        #     kl_div(log_p1_s, log_p1_t, T, kl_type=kl_type, reduction="none")
+        #     * valid_mask
+        # ).sum() / num_valid
+
         low_top_loss = (
-            kl_div(log_p1_s, log_p1_t, T, kl_type=kl_type, reduction="none")
-            * valid_mask
-        ).sum() / num_valid
+            (F.kl_div(log_p1_s, log_p1_t, reduction="none", log_target=True)
+             * valid_mask.unsqueeze(1)).sum()
+            / num_valid
+            * (T**2)
+        )
 
         # other classes loss
         log_p2_s = F.log_softmax(
@@ -138,10 +145,16 @@ def _gdkd_loss_fn2(y_s, y_t, valid_mask, w0, w1, w2, k, T, mask_magnitude, kl_ty
             soft_y_t - mask_magnitude * mask_u1, dim=1
         )
 
+        # low_other_loss = (
+        #     kl_div(log_p2_s, log_p2_t, T, kl_type=kl_type, reduction="none")
+        #     * valid_mask
+        # ).sum() / num_valid
         low_other_loss = (
-            kl_div(log_p2_s, log_p2_t, T, kl_type=kl_type, reduction="none")
-            * valid_mask
-        ).sum() / num_valid
+            (F.kl_div(log_p2_s, log_p2_t, reduction="none", log_target=True)
+             * valid_mask.unsqueeze(1)).sum()
+            / num_valid
+            * (T**2)
+        )
 
         _soft_y_s = soft_y_s.detach()[valid_mask]
         _soft_y_t = soft_y_t.detach()[valid_mask]
