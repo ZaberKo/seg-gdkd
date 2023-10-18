@@ -341,18 +341,18 @@ class Trainer(object):
                 task_loss = self.criterion(s_outputs[0], targets)
 
             if task_loss.isnan().any():
-                self.logger.error("task_loss is nan")
-                raise ValueError(f"task_loss is nan,\n image_paths: {img_paths}")
+                self.logger.error("task_loss is nan,\n image_paths: {img_paths}")
+                raise ValueError(f"task_loss is nan")
         
             if kd_loss.isnan().any():
-                self.logger.error("kd_loss is nan")
-                raise ValueError(f"kd_loss is nan,\n image_paths: {img_paths}")
+                self.logger.error("kd_loss is nan,\n image_paths: {img_paths}")
+                raise ValueError(f"kd_loss is nan")
 
             losses = task_loss + kd_loss
             lr = self.adjust_lr(base_lr=args.lr, iter=iteration-1,
                                 max_iter=args.max_iterations, power=0.9)
             self.optimizer.zero_grad()
-            losses.backward()
+            losses.backward(retain_graph=True)
 
             if args.grad_clip_norm is not None:
                 nn.utils.clip_grad_norm_(self.s_model.parameters(),
@@ -363,8 +363,21 @@ class Trainer(object):
                 
             is_nan_grad, nan_list = check_grad_is_nan(self.s_model)
             if is_nan_grad:
-                self.logger.error("grad is nan")
-                raise ValueError(f"grad is nan\n, nan_param_list: {nan_list}\n image_paths: {img_paths}")
+                self.logger.error(f"grad is nan")
+                self.logger.error(f"loss_task: {task_loss.item()}, loss_kd: {kd_loss.item()}")
+                self.logger.error(f"nan_param_list: {nan_list}")
+                self.logger.error(f"image_paths: {img_paths}")
+                self.optimizer.zero_grad()
+                task_loss.backward(retain_graph=True)
+                is_nan_grad, nan_list = check_grad_is_nan(self.s_model)
+                if is_nan_grad:
+                    self.logger.error(f"grad is nan in task_loss")
+                kd_loss.backward()
+                is_nan_grad, nan_list = check_grad_is_nan(self.s_model)
+                if is_nan_grad:
+                    self.logger.error(f"grad is nan in kd_loss")
+
+                raise ValueError('grad is nan')
 
             self.optimizer.step()
 
