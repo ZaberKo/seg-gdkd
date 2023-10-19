@@ -131,8 +131,8 @@ def parse_args():
         raise ValueError('no such network')
 
     timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
-    work_dir=Path(args.work_dir)
-    work_dir=work_dir.parent/f'{work_dir.name}_debug'
+    work_dir = Path(args.work_dir)
+    work_dir = work_dir.parent/f'{work_dir.name}_debug'
     args.work_dir = os.path.join(work_dir, timestamp)
 
     args.device = "cuda"
@@ -165,12 +165,12 @@ class Trainer(object):
         self.logger.info(vars(args))
 
         train_dataset = CSTrainValSetDebug(args.data,
-                                      list_path='./dataset/list/cityscapes/train.lst',
-                                      max_iters=args.max_iterations*args.batch_size,
-                                      crop_size=args.crop_size, scale=True, mirror=True)
+                                           list_path='./dataset/list/cityscapes/train.lst',
+                                           max_iters=args.max_iterations*args.batch_size,
+                                           crop_size=args.crop_size, scale=True, mirror=True)
         val_dataset = CSTrainValSetDebug(args.data,
-                                    list_path='./dataset/list/cityscapes/val.lst',
-                                    crop_size=(1024, 2048), scale=False, mirror=False)
+                                         list_path='./dataset/list/cityscapes/val.lst',
+                                         crop_size=(1024, 2048), scale=False, mirror=False)
 
         train_batch_size = args.batch_size // args.world_size
         train_sampler = make_data_sampler(
@@ -340,19 +340,21 @@ class Trainer(object):
             else:
                 task_loss = self.criterion(s_outputs[0], targets)
 
-
-
             _task_loss = task_loss.detach().item()
             _kd_loss = kd_loss.detach().item()
 
+            print(f"rank {self.local_rank}: task_loss: {_task_loss}, kd_loss: {_kd_loss}")
+
             if math.isnan(_task_loss):
-                self.logger.error(f"task_loss is nan, task_loss: {task_loss} {_task_loss}")
+                self.logger.error(
+                    f"task_loss is nan, task_loss: {task_loss} {_task_loss}")
                 raise ValueError("task_loss is nan")
-        
+
             if math.isnan(_kd_loss):
-                self.logger.error(f"kd_loss is nan, kd_loss: {kd_loss} {_kd_loss}")
+                self.logger.error(
+                    f"kd_loss is nan, kd_loss: {kd_loss} {_kd_loss}")
                 raise ValueError("kd_loss is nan")
-            
+
             losses = task_loss + kd_loss
             lr = self.adjust_lr(base_lr=args.lr, iter=iteration-1,
                                 max_iter=args.max_iterations, power=0.9)
@@ -365,11 +367,12 @@ class Trainer(object):
             if args.grad_clip is not None:
                 nn.utils.clip_grad_value_(self.s_model.parameters(),
                                           clip_value=args.grad_clip)
-                
+
             is_nan_grad, nan_list = check_grad_is_nan(self.s_model)
             if is_nan_grad:
                 self.logger.error(f"grad is nan")
-                self.logger.error(f"loss_task: {_task_loss}, loss_kd: {_kd_loss}")
+                self.logger.error(
+                    f"loss_task: {_task_loss}, loss_kd: {_kd_loss}")
                 self.logger.error(f"nan_param_list: {nan_list}")
                 self.logger.error(f"image_paths: {img_paths}")
                 self.optimizer.zero_grad()
@@ -382,6 +385,12 @@ class Trainer(object):
                 is_nan_grad, nan_list = check_grad_is_nan(self.s_model)
                 if is_nan_grad:
                     self.logger.error(f"grad is nan in kd_loss")
+                torch.save(dict(
+                    img=images,
+                    targets=targets,
+                    student_output=s_outputs.detach(),
+                    teacher_output=t_outputs.detach(),
+                ), f"error_input_rank{self.local_rank}.pth")
 
                 raise ValueError('grad is nan')
 
