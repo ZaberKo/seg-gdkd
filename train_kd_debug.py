@@ -373,6 +373,9 @@ class Trainer(object):
                 self.logger.error(f"grad is nan")
                 self.logger.error(
                     f"loss_task: {_task_loss}, loss_kd: {_kd_loss}")
+                self.logger.error(
+                    self.criterion_kd.train_info
+                )
                 self.logger.error(f"nan_param_list: {nan_list}")
                 self.logger.error(f"image_paths: {img_paths}")
                 self.optimizer.zero_grad()
@@ -390,6 +393,7 @@ class Trainer(object):
                     targets=targets,
                     student_output=s_outputs.detach(),
                     teacher_output=t_outputs.detach(),
+                    train_info=self.criterion_kd.train_info,
                 ), f"error_input_rank{self.local_rank}.pth")
 
                 raise ValueError('grad is nan')
