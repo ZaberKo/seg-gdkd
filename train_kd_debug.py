@@ -340,14 +340,19 @@ class Trainer(object):
             else:
                 task_loss = self.criterion(s_outputs[0], targets)
 
-            if task_loss.isnan().any():
-                self.logger.error("task_loss is nan,\n image_paths: {img_paths}")
-                raise ValueError(f"task_loss is nan")
-        
-            if kd_loss.isnan().any():
-                self.logger.error("kd_loss is nan,\n image_paths: {img_paths}")
-                raise ValueError(f"kd_loss is nan")
 
+
+            _task_loss = task_loss.detach().item()
+            _kd_loss = kd_loss.detach().item()
+
+            if math.isnan(_task_loss):
+                self.logger.error(f"task_loss is nan, task_loss: {task_loss} {_task_loss}")
+                raise ValueError("task_loss is nan")
+        
+            if math.isnan(_kd_loss):
+                self.logger.error(f"kd_loss is nan, kd_loss: {kd_loss} {_kd_loss}")
+                raise ValueError("kd_loss is nan")
+            
             losses = task_loss + kd_loss
             lr = self.adjust_lr(base_lr=args.lr, iter=iteration-1,
                                 max_iter=args.max_iterations, power=0.9)
@@ -364,7 +369,7 @@ class Trainer(object):
             is_nan_grad, nan_list = check_grad_is_nan(self.s_model)
             if is_nan_grad:
                 self.logger.error(f"grad is nan")
-                self.logger.error(f"loss_task: {task_loss.item()}, loss_kd: {kd_loss.item()}")
+                self.logger.error(f"loss_task: {_task_loss}, loss_kd: {_kd_loss}")
                 self.logger.error(f"nan_param_list: {nan_list}")
                 self.logger.error(f"image_paths: {img_paths}")
                 self.optimizer.zero_grad()
@@ -372,6 +377,7 @@ class Trainer(object):
                 is_nan_grad, nan_list = check_grad_is_nan(self.s_model)
                 if is_nan_grad:
                     self.logger.error(f"grad is nan in task_loss")
+                self.optimizer.zero_grad()
                 kd_loss.backward()
                 is_nan_grad, nan_list = check_grad_is_nan(self.s_model)
                 if is_nan_grad:
