@@ -93,11 +93,11 @@ class DKD(nn.Module):
             tckd_loss = 0.0 * y_s.sum()
             nckd_loss = 0.0 * y_s.sum()
 
-            self.train_info = dict(
-                loss_tckd=tckd_loss.detach(),
-                loss_nckd=nckd_loss.detach(),
-                num_valid=num_valid.detach(),
-            )
+        self.train_info = dict(
+            loss_tckd=tckd_loss.detach(),
+            loss_nckd=nckd_loss.detach(),
+            num_valid=num_valid.detach(),
+        )
 
         loss = self.alpha * tckd_loss + self.beta * nckd_loss
 

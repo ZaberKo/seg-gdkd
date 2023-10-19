@@ -43,11 +43,14 @@ class KD(nn.Module):
             target = target.long().flatten()  # [B*h*w]
             valid_mask = (target != self.ignore_index)
             num_valid = valid_mask.sum()
-            # loss = kl_div(log_p_s, log_p_t, self.T, valid_mask, kl_type=self.kl_type)
-            loss = (
-                kl_div(log_p_s, log_p_t, self.T, kl_type=self.kl_type,
-                       reduction="none")*valid_mask
-            ).sum() / num_valid
+
+            if num_valid > 0:
+                loss = (
+                    kl_div(log_p_s, log_p_t, self.T, kl_type=self.kl_type,
+                        reduction="none")*valid_mask
+                ).sum() / num_valid
+            else:
+                loss = 0.0 * y_s.sum()
 
         else:
             loss = kl_div(log_p_s, log_p_t, self.T, kl_type=self.kl_type)
