@@ -361,10 +361,8 @@ class Trainer(object):
             is_nan_grad, nan_list = check_grad_is_nan(self.s_model)
             if is_nan_grad:
                 self.logger.error(f"grad is nan")
-                self.logger.error(
-                    f"loss_task: {_task_loss}, loss_kd: {_kd_loss}")
-                print(f"task_loss is nan, task_loss: {task_loss} {_task_loss}")
-                print(f"kd_loss is nan, kd_loss: {kd_loss} {_kd_loss}")
+                print(f"task_loss: {str(task_loss)} {_task_loss}")
+                print(f"kd_loss: {str(kd_loss)} {_kd_loss}")
                 print("train_info:", self.criterion_kd.train_info)
                 # self.logger.error(f"nan_param_list: {nan_list}")
                 # self.logger.error(f"image_paths: {img_paths}")
@@ -381,10 +379,10 @@ class Trainer(object):
                 torch.save(dict(
                     img=images,
                     targets=targets,
-                    student_output=[x.detach() for x in s_outputs],
-                    teacher_output=[x.detach() for x in t_outputs],
+                    student_outputs=[x.detach() for x in s_outputs],
+                    teacher_outputs=[x.detach() for x in t_outputs],
                     train_info=self.criterion_kd.train_info,
-                ), f"error_input_rank{self.local_rank}.pth")
+                ), Path(self.args.work_dir).expanduser()/f"error_input_rank{self.local_rank}.pth")
 
                 raise ValueError('grad is nan')
 

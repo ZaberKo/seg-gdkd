@@ -5,6 +5,8 @@ import torch.nn.functional as F
 from .utils import kl_div
 from .dist_kd import intra_class_relation
 
+import torch.distributions as dists
+
 
 def get_masks(logits, k=5, strategy="best"):
     if strategy == "best":
@@ -33,7 +35,7 @@ def cat_mask(t, mask1, mask2):
     return rt
 
 
-def _gdkd_loss_fn(y_s, y_t, w0, w1, w2, k, T, mask_magnitude, kl_type):
+def _gdkd_loss_fn(y_s, y_t, w0, w1, w2, k, T, entropy_weight=None, mask_magnitude=1000, kl_type='forward'):
     mask_u1, mask_u2 = get_masks(y_t, k, strategy='best')
 
     soft_y_s = y_s / T
@@ -44,11 +46,20 @@ def _gdkd_loss_fn(y_s, y_t, w0, w1, w2, k, T, mask_magnitude, kl_type):
     p0_s = cat_mask(p_s, mask_u1, mask_u2)
     p0_t = cat_mask(p_t, mask_u1, mask_u2)
 
-    log_p0_s = torch.log(p0_s)
+    p0_s_dist = dists.Categorical(probs=p0_s)
+    p0_t_dist = dists.Categorical(probs=p0_t)
+
     high_loss = (
-        F.kl_div(log_p0_s, p0_t, reduction="batchmean")
+        dists.kl_divergence(p0_s_dist, p0_t_dist).mean()
         * (T**2)
     )
+
+    # log_p0_s = torch.log(p0_s)
+
+    # high_loss = (
+    #     F.kl_div(log_p0_s, p0_t, reduction="batchmean")
+    #     * (T**2)
+    # )
 
     # topk loss
     log_p1_s = F.log_softmax(
@@ -92,10 +103,17 @@ def _gdkd_loss_fn(y_s, y_t, w0, w1, w2, k, T, mask_magnitude, kl_type):
         soft_y_t_min_mean=_soft_y_t.min(1)[0].mean(),
     )
 
+    if entropy_weight is not None:
+        # add entropy reg term (maximize) to avoid extreme predictions
+        p_s_dist = dists.Categorical(probs=p_s)
+        entropy = p_s_dist.entropy().mean()
+        gdkd_loss = gdkd_loss - entropy_weight * entropy
+        train_info.update(dict(entropy=entropy.detach()))
+
     return gdkd_loss, train_info, p_s, p_t
 
 
-def _gdkd_loss_fn2(y_s, y_t, valid_mask, w0, w1, w2, k, T, mask_magnitude, kl_type):
+def _gdkd_loss_fn2(y_s, y_t, valid_mask, w0, w1, w2, k, T, entropy_weight=None, mask_magnitude=1000, kl_type='forward'):
     num_valid = valid_mask.sum()
 
     if num_valid > 0:
@@ -108,14 +126,23 @@ def _gdkd_loss_fn2(y_s, y_t, valid_mask, w0, w1, w2, k, T, mask_magnitude, kl_ty
         p_t = F.softmax(soft_y_t, dim=1)
         p0_s = cat_mask(p_s, mask_u1, mask_u2)
         p0_t = cat_mask(p_t, mask_u1, mask_u2)
+        p0_s_dist = dists.Categorical(probs=p0_s)
+        p0_t_dist = dists.Categorical(probs=p0_t)
 
-        log_p0_s = torch.log(p0_s)
         high_loss = (
-            (F.kl_div(log_p0_s, p0_t, reduction="none")
-             * valid_mask.unsqueeze(1)).sum()
-            / num_valid
+            dists.kl_divergence(p0_s_dist, p0_t_dist).mean()
             * (T**2)
         )
+
+        # log_p0_s = torch.log(p0_s)
+        # high_loss = (
+        #     (F.kl_div(log_p0_s, p0_t, reduction="none")
+        #      * valid_mask.unsqueeze(1)).sum()
+        #     / num_valid
+        #     * (T**2)
+        # )
+
+
 
         # topk loss
         log_p1_s = F.log_softmax(
@@ -188,11 +215,19 @@ def _gdkd_loss_fn2(y_s, y_t, valid_mask, w0, w1, w2, k, T, mask_magnitude, kl_ty
         **logits_info
     )
 
+    if entropy_weight is not None:
+        p_s_dist = dists.Categorical(probs=p_s)
+        entropy = p_s_dist.entropy().mean()
+        gdkd_loss = gdkd_loss - entropy_weight * entropy
+        train_info.update(dict(entropy=entropy.detach()))
+
     return gdkd_loss, train_info, p_s, p_t
 
 
 class GDKD(nn.Module):
-    def __init__(self, w0: float = 1.0, w1: float = 1.0, w2: float = 2.0, k: int = 3, T: float = 1.0, mask_magnitude=1000, kl_type="forward", ignore_index=None):
+    def __init__(self, w0: float = 1.0, w1: float = 1.0, w2: float = 2.0, k: int = 3,
+                 T: float = 1.0, mask_magnitude=1000, kl_type="forward",
+                 entropy_weight=None, ignore_index=None):
         super().__init__()
         self.w0 = w0
         self.w1 = w1
@@ -201,6 +236,7 @@ class GDKD(nn.Module):
         self.T = T
         self.mask_magnitude = mask_magnitude
         self.kl_type = kl_type
+        self.entropy_weight = entropy_weight
 
         self.ignore_index = ignore_index
 
@@ -231,6 +267,7 @@ class GDKD(nn.Module):
                 w2=self.w2,
                 k=self.k,
                 T=self.T,
+                entropy_weight=self.entropy_weight,
                 mask_magnitude=self.mask_magnitude,
                 kl_type=self.kl_type,
             )
@@ -243,6 +280,7 @@ class GDKD(nn.Module):
                 w2=self.w2,
                 k=self.k,
                 T=self.T,
+                entropy_weight=self.entropy_weight,
                 mask_magnitude=self.mask_magnitude,
                 kl_type=self.kl_type,
             )
