@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from .utils import kl_div
 from .dist_kd import intra_class_relation
 
+from torch.distributions.utils import clamp_probs
 
 def _get_gt_mask(logits, target):
     target = target.reshape(-1)
@@ -70,6 +71,12 @@ class DKD(nn.Module):
             p0_s = cat_mask(p_s, gt_mask, other_mask)
             p0_t = cat_mask(p_t, gt_mask, other_mask)
 
+            p0_s = clamp_probs(p0_s)
+            p0_t = clamp_probs(p0_t)
+
+            eps = torch.finfo(y_s.dtype).eps
+            num_inf = ((p0_s[:, 1] < eps) | (p0_t[:, 1] < eps)).sum()
+
             log_p0_s = torch.log(p0_s)
             tckd_loss = (
                 (F.kl_div(log_p0_s, p0_t, reduction="none")
@@ -93,10 +100,13 @@ class DKD(nn.Module):
             tckd_loss = 0.0 * y_s.sum()
             nckd_loss = 0.0 * y_s.sum()
 
+            num_inf = y_s.new_zeros(())
+
         self.train_info = dict(
             loss_tckd=tckd_loss.detach(),
             loss_nckd=nckd_loss.detach(),
             num_valid=num_valid.detach(),
+            num_inf=num_inf.detach()
         )
 
         loss = self.alpha * tckd_loss + self.beta * nckd_loss

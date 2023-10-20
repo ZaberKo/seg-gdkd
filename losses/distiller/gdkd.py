@@ -6,6 +6,7 @@ from .utils import kl_div
 from .dist_kd import intra_class_relation
 
 import torch.distributions as dists
+from torch.distributions.utils import clamp_probs
 
 
 def get_masks(logits, k=5, strategy="best"):
@@ -46,20 +47,36 @@ def _gdkd_loss_fn(y_s, y_t, w0, w1, w2, k, T, entropy_weight=None, mask_magnitud
     p0_s = cat_mask(p_s, mask_u1, mask_u2)
     p0_t = cat_mask(p_t, mask_u1, mask_u2)
 
-    p0_s_dist = dists.Categorical(probs=p0_s)
-    p0_t_dist = dists.Categorical(probs=p0_t)
+    p0_s = clamp_probs(p0_s)
+    p0_t = clamp_probs(p0_t)
 
-    high_loss = (
-        dists.kl_divergence(p0_s_dist, p0_t_dist).mean()
-        * (T**2)
-    )
+    eps = torch.finfo(y_s.dtype).eps
+    num_inf = ((p0_s[:, 1] < eps) | (p0_t[:, 1] < eps)).sum()
 
-    # log_p0_s = torch.log(p0_s)
-
+    # p0_s_dist = dists.Categorical(probs=p0_s)
+    # p0_t_dist = dists.Categorical(probs=p0_t)
     # high_loss = (
-    #     F.kl_div(log_p0_s, p0_t, reduction="batchmean")
+    #     dists.kl_divergence(p0_t_dist, p0_s_dist).mean()
     #     * (T**2)
     # )
+    # eps=torch.finfo(y_s.dtype).eps
+    # notinf_mask = (p0_s[:, 1] > eps) & (p0_t[:, 1] > eps)
+    # num_inf = notinf_mask.shape[0] - notinf_mask.sum()
+    # if num_inf > 0 :
+    #     p0_s = p0_s[notinf_mask]
+    #     p0_t = p0_t[notinf_mask]
+    #     soft_y_s = soft_y_s[notinf_mask]
+    #     soft_y_t = soft_y_t[notinf_mask]
+    #     mask_u1 = mask_u1[notinf_mask]
+    #     mask_u2 = mask_u2[notinf_mask]
+
+    # train_info = dict(num_inf=num_inf.detach())
+
+    log_p0_s = torch.log(p0_s)
+    high_loss = (
+        F.kl_div(log_p0_s, p0_t, reduction="batchmean")
+        * (T**2)
+    )
 
     # topk loss
     log_p1_s = F.log_softmax(
@@ -69,7 +86,8 @@ def _gdkd_loss_fn(y_s, y_t, w0, w1, w2, k, T, entropy_weight=None, mask_magnitud
         soft_y_t - mask_magnitude * mask_u2, dim=1
     )
 
-    low_top_loss = kl_div(log_p1_s, log_p1_t, T, kl_type=kl_type)
+    low_top_loss = kl_div(
+        log_p1_s, log_p1_t, T, kl_type=kl_type)
 
     # other classes loss
     log_p2_s = F.log_softmax(
@@ -101,6 +119,7 @@ def _gdkd_loss_fn(y_s, y_t, w0, w1, w2, k, T, entropy_weight=None, mask_magnitud
         soft_y_t_max_mean=_soft_y_t.max(1)[0].mean(),
         soft_y_t_min=_soft_y_t.min(),
         soft_y_t_min_mean=_soft_y_t.min(1)[0].mean(),
+        num_inf=num_inf.detach()
     )
 
     if entropy_weight is not None:
@@ -126,23 +145,27 @@ def _gdkd_loss_fn2(y_s, y_t, valid_mask, w0, w1, w2, k, T, entropy_weight=None, 
         p_t = F.softmax(soft_y_t, dim=1)
         p0_s = cat_mask(p_s, mask_u1, mask_u2)
         p0_t = cat_mask(p_t, mask_u1, mask_u2)
-        p0_s_dist = dists.Categorical(probs=p0_s)
-        p0_t_dist = dists.Categorical(probs=p0_t)
 
-        high_loss = (
-            dists.kl_divergence(p0_s_dist, p0_t_dist).mean()
-            * (T**2)
-        )
+        p0_s = clamp_probs(p0_s)
+        p0_t = clamp_probs(p0_t)
 
-        # log_p0_s = torch.log(p0_s)
+        eps = torch.finfo(y_s.dtype).eps
+        num_inf = ((p0_s[:, 1] < eps) | (p0_t[:, 1] < eps)).sum()
+
+        # p0_s_dist = dists.Categorical(probs=p0_s)
+        # p0_t_dist = dists.Categorical(probs=p0_t)
         # high_loss = (
-        #     (F.kl_div(log_p0_s, p0_t, reduction="none")
-        #      * valid_mask.unsqueeze(1)).sum()
-        #     / num_valid
+        #     dists.kl_divergence(p0_s_dist, p0_t_dist).mean()
         #     * (T**2)
         # )
 
-
+        log_p0_s = torch.log(p0_s)
+        high_loss = (
+            (F.kl_div(log_p0_s, p0_t, reduction="none")
+             * valid_mask.unsqueeze(1)).sum()
+            / num_valid
+            * (T**2)
+        )
 
         # topk loss
         log_p1_s = F.log_softmax(
@@ -201,6 +224,7 @@ def _gdkd_loss_fn2(y_s, y_t, valid_mask, w0, w1, w2, k, T, entropy_weight=None, 
         low_top_loss = 0.0 * y_s.sum()
         low_other_loss = 0.0 * y_s.sum()
 
+        num_inf = y_s.new_zeros(())
         logits_info = {}
 
     gdkd_loss = (w0 * high_loss +
@@ -212,7 +236,8 @@ def _gdkd_loss_fn2(y_s, y_t, valid_mask, w0, w1, w2, k, T, entropy_weight=None, 
         loss_low_top=low_top_loss.detach(),
         loss_low_other=low_other_loss.detach(),
         num_valid=num_valid.detach(),
-        **logits_info
+        num_inf=num_inf.detach()
+        ** logits_info
     )
 
     if entropy_weight is not None:
