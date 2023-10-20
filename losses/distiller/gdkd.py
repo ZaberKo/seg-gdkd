@@ -236,7 +236,7 @@ def _gdkd_loss_fn2(y_s, y_t, valid_mask, w0, w1, w2, k, T, entropy_weight=None, 
         loss_low_top=low_top_loss.detach(),
         loss_low_other=low_other_loss.detach(),
         num_valid=num_valid.detach(),
-        num_inf=num_inf.detach()
+        num_inf=num_inf.detach(),
         ** logits_info
     )
 
