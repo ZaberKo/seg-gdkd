@@ -19,7 +19,7 @@ import torch.distributed as dist
 from utils.distributed import *
 from utils.logger import setup_logger
 from utils.score import SegmentationMetric
-from dataset.datasets import CSTrainValSet
+from dataset import get_dataset
 from utils.flops import cal_multi_adds, cal_param_size
 from models.model_zoo import get_segmentation_model
 from losses.loss import SegCrossEntropyLoss
@@ -62,7 +62,6 @@ def parse_args():
                         help='input batch size for training (default: 8)')
     
     # cuda setting
-    parser.add_argument('--gpu-id', type=str, default='0') 
     parser.add_argument('--no-cuda', action='store_true', default=False,
                         help='disables CUDA training')
     parser.add_argument('--local_rank', type=int, default=0)
@@ -120,13 +119,7 @@ class Trainer(object):
         self.device = torch.device(args.device)
         self.num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
 
-        train_dataset = CSTrainValSet(args.data, 
-                                        list_path='./dataset/list/cityscapes/train.lst', 
-                                        max_iters=args.max_iterations*args.batch_size, 
-                                        crop_size=args.crop_size, scale=True, mirror=True)
-        val_dataset = CSTrainValSet(args.data, 
-                                    list_path='./dataset/list/cityscapes/val.lst', 
-                                    crop_size=(1024, 2048), scale=False, mirror=False)
+        train_dataset, val_dataset = get_dataset(args)
 
 
         # create network
@@ -140,9 +133,9 @@ class Trainer(object):
                                             norm_layer=BatchNorm2d,
                                             num_class=train_dataset.num_class).to(self.device)
 
-        with torch.no_grad():
-            logger.info('Params: %.2fM FLOPs: %.2fG'
-                % (cal_param_size(self.model) / 1e6, cal_multi_adds(self.model, (1, 3, 1024, 2048))/1e9))
+        # with torch.no_grad():
+        #     logger.info('Params: %.2fM FLOPs: %.2fG'
+        #         % (cal_param_size(self.model) / 1e6, cal_multi_adds(self.model, (1, 3, 1024, 2048))/1e9))
         
 
         args.batch_size = args.batch_size // num_gpus
@@ -293,7 +286,7 @@ class Trainer(object):
 
             self.metric.update(full_probs, target)
             pixAcc, mIoU = self.metric.get()
-            logger.info(str(args.local_rank) + "Sample: {:d}, Validation pixAcc: {:.3f}, mIoU: {:.3f}".format(i + 1, pixAcc, mIoU))
+            logger.info("Sample: {:d}, Validation pixAcc: {:.3f}, mIoU: {:.3f}".format(i + 1, pixAcc, mIoU))
         
         if self.num_gpus > 1:
             sum_total_correct = torch.tensor(self.metric.total_correct).cuda().to(args.local_rank)
@@ -343,7 +336,6 @@ if __name__ == '__main__':
     args = parse_args()
 
     # reference maskrcnn-benchmark
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
     num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
     args.num_gpus = num_gpus
     args.distributed = num_gpus > 1

@@ -19,7 +19,7 @@ from utils.score import SegmentationMetric
 from utils.visualize import get_color_pallete
 from utils.logger import setup_logger
 from utils.distributed import synchronize, get_rank, make_data_sampler, make_batch_data_sampler
-from dataset.datasets import CSValSet
+from dataset.cityscapes import CSValSet
 from utils.flops import cal_multi_adds, cal_param_size
 
 

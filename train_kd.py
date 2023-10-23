@@ -1,6 +1,6 @@
 from tqdm import tqdm
 from utils.flops import cal_multi_adds, cal_param_size
-from dataset.datasets import CSTrainValSet
+from dataset import get_dataset
 from utils.score import SegmentationMetric
 from utils.logger import setup_logger
 from utils.distributed import *
@@ -150,13 +150,7 @@ class Trainer(object):
         self.logger.info("Using {} GPUs".format(args.world_size))
         self.logger.info(vars(args))
 
-        train_dataset = CSTrainValSet(args.data,
-                                      list_path='./dataset/list/cityscapes/train.lst',
-                                      max_iters=args.max_iterations*args.batch_size,
-                                      crop_size=args.crop_size, scale=True, mirror=True)
-        val_dataset = CSTrainValSet(args.data,
-                                    list_path='./dataset/list/cityscapes/val.lst',
-                                    crop_size=(1024, 2048), scale=False, mirror=False)
+        train_dataset, val_dataset = get_dataset(args)
 
         train_batch_size = args.batch_size // args.world_size
         train_sampler = make_data_sampler(
@@ -302,10 +296,6 @@ class Trainer(object):
         #         enumerate(self.train_loader, 1), total=len(self.train_loader)):
         for iteration, (images, targets, _) in enumerate(self.train_loader, 1):
             self.iters = iteration
-
-            # if (targets == -1).all():
-            #     self.logger.error("All targets are -1")
-            #     break
 
             images = images.to(self.device)
             targets = targets.long().to(self.device)

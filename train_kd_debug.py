@@ -1,5 +1,6 @@
 from tqdm import tqdm
 from utils.flops import cal_multi_adds, cal_param_size
+from dataset import get_dataset
 from utils.score import SegmentationMetric
 from utils.logger import setup_logger
 from utils.distributed import *
@@ -26,8 +27,6 @@ from pathlib import Path
 import wandb
 
 from collections import defaultdict
-
-from dataset.datasets_debug import CSTrainValSetDebug
 
 cur_path = os.path.abspath(os.path.dirname(__file__))
 root_path = os.path.split(cur_path)[0]
@@ -164,13 +163,7 @@ class Trainer(object):
         self.logger.info("Using {} GPUs".format(args.world_size))
         self.logger.info(vars(args))
 
-        train_dataset = CSTrainValSetDebug(args.data,
-                                           list_path='./dataset/list/cityscapes/train.lst',
-                                           max_iters=args.max_iterations*args.batch_size,
-                                           crop_size=args.crop_size, scale=True, mirror=True)
-        val_dataset = CSTrainValSetDebug(args.data,
-                                         list_path='./dataset/list/cityscapes/val.lst',
-                                         crop_size=(1024, 2048), scale=False, mirror=False)
+        train_dataset, val_dataset = get_dataset(args)
 
         train_batch_size = args.batch_size // args.world_size
         train_sampler = make_data_sampler(
