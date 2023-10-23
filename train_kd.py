@@ -503,7 +503,7 @@ if __name__ == '__main__':
             os.makedirs(args.work_dir)
 
         wandb_name = args.experiment_name
-        wandb_tags = [args.kd_method, f'{args.student_model}-{args.student_backbone}',
+        wandb_tags = [args.dataset, args.kd_method, f'{args.student_model}-{args.student_backbone}',
                       f'{args.teacher_model}-{args.teacher_backbone}', 'cityscapes']
 
         suffix_list = []
