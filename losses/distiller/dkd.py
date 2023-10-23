@@ -71,11 +71,11 @@ class DKD(nn.Module):
             p0_s = cat_mask(p_s, gt_mask, other_mask)
             p0_t = cat_mask(p_t, gt_mask, other_mask)
 
-            p0_s = clamp_probs(p0_s)
-            p0_t = clamp_probs(p0_t)
-
             eps = torch.finfo(y_s.dtype).eps
             num_inf = ((p0_s[:, 1] < eps) | (p0_t[:, 1] < eps)).sum()
+
+            p0_s = clamp_probs(p0_s)
+            p0_t = clamp_probs(p0_t)
 
             log_p0_s = torch.log(p0_s)
             tckd_loss = (

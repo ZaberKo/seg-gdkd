@@ -47,11 +47,11 @@ def _gdkd_loss_fn(y_s, y_t, w0, w1, w2, k, T, entropy_weight=None, mask_magnitud
     p0_s = cat_mask(p_s, mask_u1, mask_u2)
     p0_t = cat_mask(p_t, mask_u1, mask_u2)
 
-    p0_s = clamp_probs(p0_s)
-    p0_t = clamp_probs(p0_t)
-
     eps = torch.finfo(y_s.dtype).eps
     num_inf = ((p0_s[:, 1] < eps) | (p0_t[:, 1] < eps)).sum()
+
+    p0_s = clamp_probs(p0_s)
+    p0_t = clamp_probs(p0_t)
 
     # p0_s_dist = dists.Categorical(probs=p0_s)
     # p0_t_dist = dists.Categorical(probs=p0_t)
@@ -146,11 +146,11 @@ def _gdkd_loss_fn2(y_s, y_t, valid_mask, w0, w1, w2, k, T, entropy_weight=None, 
         p0_s = cat_mask(p_s, mask_u1, mask_u2)
         p0_t = cat_mask(p_t, mask_u1, mask_u2)
 
-        p0_s = clamp_probs(p0_s)
-        p0_t = clamp_probs(p0_t)
-
         eps = torch.finfo(y_s.dtype).eps
         num_inf = ((p0_s[:, 1] < eps) | (p0_t[:, 1] < eps)).sum()
+
+        p0_s = clamp_probs(p0_s)
+        p0_t = clamp_probs(p0_t)
 
         # p0_s_dist = dists.Categorical(probs=p0_s)
         # p0_t_dist = dists.Categorical(probs=p0_t)
