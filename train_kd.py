@@ -495,7 +495,7 @@ if __name__ == '__main__':
         torch.cuda.set_device(args.local_rank)
         synchronize()
 
-    args.experiment_name = f'{args.kd_method}_{args.student_model}-{args.student_backbone}_{args.teacher_model}-{args.teacher_backbone}'
+    args.experiment_name = f'{args.dataset}_{args.kd_method}_{args.student_model}-{args.student_backbone}_{args.teacher_model}-{args.teacher_backbone}'
 
     if is_main_process():
         work_dir = Path(args.work_dir).expanduser()
