@@ -1,4 +1,4 @@
-from .cityscapes import CSTrainValSet
+from .cityscapes import CSTrainValSet, CSValSet
 from .ade20k import ADETrainSet, ADEDataValSet
 from .coco_stuff_164k import CocoStuff164kTrainSet, CocoStuff164kValSet
 
@@ -31,3 +31,18 @@ def get_dataset(args):
         raise ValueError('dataset unfind')
 
     return train_dataset, val_dataset
+
+
+def get_val_dataset(args):
+    if args.dataset == 'citys':
+        val_dataset = CSValSet(
+            args.data, './dataset/list/cityscapes/val.lst', crop_size=(1024, 2048))
+    elif args.dataset == 'ade20k':
+        val_dataset = ADEDataValSet(args.data)
+    elif args.dataset == 'coco_stuff_164k':
+        val_dataset = CocoStuff164kValSet(
+            args.data, './dataset/list/coco_stuff_164k/coco_stuff_164k_val.txt')
+    else:
+        raise ValueError('dataset unfind')
+
+    return val_dataset
