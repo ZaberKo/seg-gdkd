@@ -7,7 +7,7 @@ from utils.distributed import *
 from utils.config import DictAction
 from models.model_zoo import get_segmentation_model
 from losses.distiller import get_criterion_distiller
-from losses.loss import SegCrossEntropyLoss, CriterionKD, CriterionMiniBatchCrossImagePair
+from losses.loss import SegCrossEntropyLoss
 import torch.nn.functional as F
 import torch.distributed as dist
 import torch.backends.cudnn as cudnn
@@ -73,7 +73,7 @@ def parse_args():
     parser.add_argument('--momentum', type=float, default=0.9, metavar='M',
                         help='momentum (default: 0.9)')
     parser.add_argument('--weight-decay', type=float, default=5e-4, metavar='M',
-                        help='w-decay (default: 5e-4)')
+                        help='w-decay (default: 5e-4)') # ori: 1e-4
     parser.add_argument('--grad-clip', type=float)
     parser.add_argument('--grad-clip-norm', type=float)
 
@@ -246,6 +246,13 @@ class Trainer(object):
                 model = self.s_model
             wandb.watch(model, log='all',
                         log_freq=args.log_iter, log_graph=True)
+
+    def adjust_lr_old(self, base_lr, iter, max_iter, power):
+        cur_lr = base_lr*((1-float(iter)/max_iter)**(power))
+        for param_group in self.optimizer.param_groups:
+            param_group['lr'] = cur_lr
+
+        return cur_lr
 
     def adjust_lr(self, base_lr, iter, max_iter, power):
         cur_lr = 1e-4 + (base_lr - 1e-4)*((1-float(iter)/max_iter)**(power))
@@ -503,8 +510,8 @@ if __name__ == '__main__':
             os.makedirs(args.work_dir)
 
         wandb_name = args.experiment_name
-        wandb_tags = [args.dataset, args.kd_method, f'{args.student_model}-{args.student_backbone}',
-                      f'{args.teacher_model}-{args.teacher_backbone}', 'cityscapes']
+        wandb_tags = [args.kd_method, f'{args.student_model}-{args.student_backbone}',
+                      f'{args.teacher_model}-{args.teacher_backbone}', args.dataset]
 
         suffix_list = []
         if args.kd_options is not None:
