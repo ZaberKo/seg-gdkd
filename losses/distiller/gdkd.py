@@ -36,7 +36,18 @@ def cat_mask(t, mask1, mask2):
     return rt
 
 
-def _gdkd_loss_fn(y_s, y_t, w0, w1, w2, k, T, entropy_weight=None, mask_magnitude=1000, kl_type='forward'):
+def _gdkd_loss_fn(y_s, y_t, target, w0, w1, w2, k, T, entropy_weight=None, mask_magnitude=1000, kl_type='forward', ignore_incorrect=False):
+    train_info = {}
+    if ignore_incorrect:
+        pred_t = y_t.argmax(dim=1)
+        correct_mask = (target == pred_t)
+        num_incorrect = target.shape[0] - correct_mask.sum()
+        if num_incorrect>0:
+            y_s = y_s[correct_mask]
+            y_t = y_t[correct_mask]
+        
+        train_info.update(dict(num_incorrect=num_incorrect.detach()))
+
     mask_u1, mask_u2 = get_masks(y_t, k, strategy='best')
 
     soft_y_s = y_s / T
@@ -52,25 +63,6 @@ def _gdkd_loss_fn(y_s, y_t, w0, w1, w2, k, T, entropy_weight=None, mask_magnitud
 
     p0_s = clamp_probs(p0_s)
     p0_t = clamp_probs(p0_t)
-
-    # p0_s_dist = dists.Categorical(probs=p0_s)
-    # p0_t_dist = dists.Categorical(probs=p0_t)
-    # high_loss = (
-    #     dists.kl_divergence(p0_t_dist, p0_s_dist).mean()
-    #     * (T**2)
-    # )
-    # eps=torch.finfo(y_s.dtype).eps
-    # notinf_mask = (p0_s[:, 1] > eps) & (p0_t[:, 1] > eps)
-    # num_inf = notinf_mask.shape[0] - notinf_mask.sum()
-    # if num_inf > 0 :
-    #     p0_s = p0_s[notinf_mask]
-    #     p0_t = p0_t[notinf_mask]
-    #     soft_y_s = soft_y_s[notinf_mask]
-    #     soft_y_t = soft_y_t[notinf_mask]
-    #     mask_u1 = mask_u1[notinf_mask]
-    #     mask_u2 = mask_u2[notinf_mask]
-
-    # train_info = dict(num_inf=num_inf.detach())
 
     log_p0_s = torch.log(p0_s)
     high_loss = (
@@ -107,7 +99,7 @@ def _gdkd_loss_fn(y_s, y_t, w0, w1, w2, k, T, entropy_weight=None, mask_magnitud
     _soft_y_s = soft_y_s.detach()
     _soft_y_t = soft_y_t.detach()
 
-    train_info = dict(
+    train_info.update(dict(
         loss_high=high_loss.detach(),
         loss_low_top=low_top_loss.detach(),
         loss_low_other=low_other_loss.detach(),
@@ -120,7 +112,7 @@ def _gdkd_loss_fn(y_s, y_t, w0, w1, w2, k, T, entropy_weight=None, mask_magnitud
         soft_y_t_min=_soft_y_t.min(),
         soft_y_t_min_mean=_soft_y_t.min(1)[0].mean(),
         num_inf=num_inf.detach()
-    )
+    ))
 
     if entropy_weight is not None:
         # add entropy reg term (maximize) to avoid extreme predictions
@@ -132,7 +124,19 @@ def _gdkd_loss_fn(y_s, y_t, w0, w1, w2, k, T, entropy_weight=None, mask_magnitud
     return gdkd_loss, train_info, p_s, p_t
 
 
-def _gdkd_loss_fn2(y_s, y_t, valid_mask, w0, w1, w2, k, T, entropy_weight=None, mask_magnitude=1000, kl_type='forward'):
+def _gdkd_loss_fn2(y_s, y_t, target, valid_mask, w0, w1, w2, k, T, entropy_weight=None, mask_magnitude=1000, kl_type='forward', ignore_incorrect=False):
+    train_info = {}
+    if ignore_incorrect:
+        pred_t = y_t.argmax(dim=1)
+        correct_mask = (target == pred_t)
+        num_incorrect = target.shape[0] - correct_mask.sum()
+        if num_incorrect>0:
+            y_s = y_s[correct_mask]
+            y_t = y_t[correct_mask]
+            valid_mask = valid_mask[correct_mask]
+        
+        train_info.update(dict(num_incorrect=num_incorrect.detach()))
+
     num_valid = valid_mask.sum()
 
     if num_valid > 0:
@@ -231,14 +235,14 @@ def _gdkd_loss_fn2(y_s, y_t, valid_mask, w0, w1, w2, k, T, entropy_weight=None, 
                  w1 * low_top_loss +
                  w2 * low_other_loss)
 
-    train_info = dict(
+    train_info.update(dict(
         loss_high=high_loss.detach(),
         loss_low_top=low_top_loss.detach(),
         loss_low_other=low_other_loss.detach(),
         num_valid=num_valid.detach(),
         num_inf=num_inf.detach(),
         ** logits_info
-    )
+    )) 
 
     if entropy_weight is not None:
         p_s_dist = dists.Categorical(probs=p_s)
@@ -252,7 +256,7 @@ def _gdkd_loss_fn2(y_s, y_t, valid_mask, w0, w1, w2, k, T, entropy_weight=None, 
 class GDKD(nn.Module):
     def __init__(self, w0: float = 1.0, w1: float = 1.0, w2: float = 2.0, k: int = 3,
                  T: float = 1.0, mask_magnitude=1000, kl_type="forward",
-                 entropy_weight=None, ignore_index=None):
+                 entropy_weight=None, ignore_index=None, ignore_incorrect=False):
         super().__init__()
         self.w0 = w0
         self.w1 = w1
@@ -264,6 +268,7 @@ class GDKD(nn.Module):
         self.entropy_weight = entropy_weight
 
         self.ignore_index = ignore_index
+        self.ignore_incorrect = ignore_incorrect
 
         self.dist_intra_weight = None
 
@@ -286,6 +291,7 @@ class GDKD(nn.Module):
             loss, self.train_info, p_s, p_t = _gdkd_loss_fn2(
                 y_s=y_s,
                 y_t=y_t,
+                target=target,
                 valid_mask=valid_mask,
                 w0=self.w0,
                 w1=self.w1,
@@ -295,11 +301,19 @@ class GDKD(nn.Module):
                 entropy_weight=self.entropy_weight,
                 mask_magnitude=self.mask_magnitude,
                 kl_type=self.kl_type,
+                ignore_incorrect=self.ignore_incorrect
             )
         else:
+            if self.ignore_incorrect:
+                target = F.interpolate(
+                    target.float().unsqueeze(1), (h, w), mode='nearest').squeeze(1)
+                target = target.long().flatten()  # [B*h*w]
+            else:
+                target = None
             loss, self.train_info, p_s, p_t = _gdkd_loss_fn(
                 y_s=y_s,
                 y_t=y_t,
+                target=target,
                 w0=self.w0,
                 w1=self.w1,
                 w2=self.w2,
@@ -308,6 +322,7 @@ class GDKD(nn.Module):
                 entropy_weight=self.entropy_weight,
                 mask_magnitude=self.mask_magnitude,
                 kl_type=self.kl_type,
+                ignore_incorrect=self.ignore_incorrect
             )
 
         if self.dist_intra_weight is not None:
