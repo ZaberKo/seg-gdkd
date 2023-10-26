@@ -3,7 +3,7 @@ import torch.nn.functional as F
 
 
 
-def kl_div(log_p, log_q, T, kl_type, reduction="batchmean"):
+def kl_div(log_p, log_q, T, kl_type='forward', reduction="batchmean"):
     if kl_type == "forward":
         res = F.kl_div(log_p, log_q, reduction=reduction,
                        log_target=True)
