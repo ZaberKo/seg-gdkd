@@ -33,4 +33,4 @@ def clamp_probs(probs):
 def get_entropy(probs):
     probs = clamp_probs(probs)
     entropy = - (probs.log() * probs).sum(-1)
-    return entropy
+    return entropy.mean()
