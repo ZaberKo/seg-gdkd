@@ -1,4 +1,4 @@
-from .dist_kd import DIST
+from .dist import DIST
 from .kd import KD, KDDIST
 from .dkd import DKD, DKDDIST
 from .gdkd import GDKD, GDKDDIST

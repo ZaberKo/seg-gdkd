@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .utils import kl_div
-from .dist_kd import intra_class_relation
+from .utils import kl_div, get_entropy
+from .dist import intra_class_relation
 
 
 class KD(nn.Module):
@@ -46,14 +46,21 @@ class KD(nn.Module):
 
             if num_valid > 0:
                 loss = (
-                    kl_div(log_p_s, log_p_t, self.T, kl_type=self.kl_type,
-                        reduction="none")*valid_mask
-                ).sum() / num_valid
+                    (F.kl_div(log_p_s, log_p_t, reduction="none", log_target=True)
+                     * valid_mask.unsqueeze(1)).sum()
+                    / num_valid
+                    * (self.T**2)
+                )
             else:
                 loss = 0.0 * y_s.sum()
 
         else:
             loss = kl_div(log_p_s, log_p_t, self.T, kl_type=self.kl_type)
+
+        p_s = F.softmax(soft_y_s, dim=1)
+        self.train_info = dict(
+            entropy=get_entropy(p_s.detach())
+        )
 
         if self.dist_intra_weight is not None:
             p_s = F.softmax(soft_y_s, dim=1)
@@ -61,9 +68,9 @@ class KD(nn.Module):
             dist_intra_loss = intra_class_relation(p_s, p_t)
             loss = loss + self.dist_intra_weight * dist_intra_loss
 
-            self.train_info = dict(
+            self.train_info.update(dict(
                 loss_dist_intra=dist_intra_loss.detach()
-            )
+            )) 
 
         return loss
 

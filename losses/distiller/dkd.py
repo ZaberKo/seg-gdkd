@@ -2,10 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .utils import kl_div
-from .dist_kd import intra_class_relation
+from .utils import kl_div, clamp_probs, get_entropy
+from .dist import intra_class_relation
 
-from torch.distributions.utils import clamp_probs
 
 def _get_gt_mask(logits, target):
     target = target.reshape(-1)
@@ -27,13 +26,12 @@ def cat_mask(t, mask1, mask2):
 
 
 class DKD(nn.Module):
-    def __init__(self, alpha: float = 1.0, beta: float = 2.0, T: float = 1.0, mask_magnitude=1000, kl_type="forward"):
+    def __init__(self, alpha: float = 1.0, beta: float = 2.0, T: float = 1.0, mask_magnitude=1000):
         super().__init__()
         self.alpha = alpha
         self.beta = beta
         self.T = T
         self.mask_magnitude = mask_magnitude
-        self.kl_type = kl_type
 
         self.dist_intra_weight = None
         self.ignore_index = -1
@@ -59,15 +57,16 @@ class DKD(nn.Module):
         num_valid = valid_mask.sum()  # keep as tensor
         # accum_batch_size = ingore_mask.shape[0]
 
+        soft_y_s = y_s / self.T
+        soft_y_t = y_t / self.T
+
+        p_s = F.softmax(soft_y_s, dim=1)
+        p_t = F.softmax(soft_y_t, dim=1)
+
         if num_valid > 0:
             gt_mask = _get_gt_mask(y_t, target)
             other_mask = _get_other_mask(y_t, target)
 
-            soft_y_s = y_s / self.T
-            soft_y_t = y_t / self.T
-
-            p_s = F.softmax(soft_y_s, dim=1)
-            p_t = F.softmax(soft_y_t, dim=1)
             p0_s = cat_mask(p_s, gt_mask, other_mask)
             p0_t = cat_mask(p_t, gt_mask, other_mask)
 
@@ -93,9 +92,11 @@ class DKD(nn.Module):
             )
 
             nckd_loss = (
-                kl_div(log_p2_s, log_p2_t, self.T, kl_type=self.kl_type,
-                       reduction="none")*valid_mask
-            ).sum() / num_valid
+                (F.kl_div(log_p2_s, log_p2_t, reduction="none", log_target=True)
+                 * valid_mask.unsqueeze(1)).sum()
+                / num_valid
+                * (self.T**2)
+            )
         else:
             tckd_loss = 0.0 * y_s.sum()
             nckd_loss = 0.0 * y_s.sum()
@@ -106,7 +107,8 @@ class DKD(nn.Module):
             loss_tckd=tckd_loss.detach(),
             loss_nckd=nckd_loss.detach(),
             num_valid=num_valid.detach(),
-            num_inf=num_inf.detach()
+            num_inf=num_inf.detach(),
+            entropy=get_entropy(p_s.detach())
         )
 
         loss = self.alpha * tckd_loss + self.beta * nckd_loss

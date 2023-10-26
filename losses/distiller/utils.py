@@ -1,6 +1,8 @@
 import torch
 import torch.nn.functional as F
 
+
+
 def kl_div(log_p, log_q, T, kl_type, reduction="batchmean"):
     if kl_type == "forward":
         res = F.kl_div(log_p, log_q, reduction=reduction,
@@ -22,3 +24,13 @@ def kl_div(log_p, log_q, T, kl_type, reduction="batchmean"):
     res = res * (T**2)
 
     return res
+
+
+def clamp_probs(probs):
+    eps = torch.finfo(probs.dtype).eps
+    return probs.clamp(min=eps, max=1 - eps)
+
+def get_entropy(probs):
+    probs = clamp_probs(probs)
+    entropy = - (probs.log() * probs).sum(-1)
+    return entropy
