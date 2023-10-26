@@ -71,8 +71,6 @@ class GDKD(nn.Module):
             if self.ignore_incorrect or self.ignore_index:
                 target = F.interpolate(
                     target.float().unsqueeze(1), (h, w), mode='nearest').squeeze(1)
-            else:
-                target = None
 
         # [B,C,h,w] -> [B,h,w,C] -> [B*h*w,C]
         y_s = y_s.permute(0, 2, 3, 1).reshape(-1, num_classes)
