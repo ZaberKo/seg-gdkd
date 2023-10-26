@@ -95,7 +95,7 @@ class GDKD(nn.Module):
 
         num_valid = valid_mask.sum()
         num_ignore = target.shape[0]-num_valid.detach()
-        self.train_info.update(dict(num_ignore=num_valid))
+        self.train_info.update(dict(num_ignore=num_ignore))
 
         if num_ignore == 0:
             loss, p_s, p_t, train_info = self._gdkd_loss(y_s, y_t)
