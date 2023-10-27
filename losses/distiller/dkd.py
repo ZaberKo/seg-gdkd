@@ -69,6 +69,8 @@ class DKD(nn.Module):
         return loss
 
     def forward_flatten(self, y_s, y_t, target):
+        target = target.clone()
+
         # move target -1 to 0, then use mask
         valid_mask = target != self.ignore_index  # [B*h*w]
         target[~valid_mask] = 0
