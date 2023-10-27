@@ -26,7 +26,8 @@ def cat_mask(t, mask1, mask2):
 
 
 class DKD(nn.Module):
-    def __init__(self, alpha: float = 1.0, beta: float = 2.0, T: float = 1.0, mask_magnitude=1000):
+    def __init__(self, alpha: float = 1.0, beta: float = 2.0, T: float = 1.0,
+                 mask_magnitude=1000, resize_out: bool = False):
         super().__init__()
         self.alpha = alpha
         self.beta = beta
@@ -35,6 +36,7 @@ class DKD(nn.Module):
 
         self.dist_intra_weight = None
         self.ignore_index = -1
+        self.resize_out = resize_out
 
         self.train_info = {}
 
@@ -42,20 +44,35 @@ class DKD(nn.Module):
         assert y_s.ndim == 4
 
         num_classes, h, w = y_s.shape[1:]
+        H, W = target.shape[1:]
+
+        if self.resize_out:
+            # resize model out
+            y_s = F.interpolate(
+                y_s, (H, W), mode='bilinear', align_corners=True)
+            y_t = F.interpolate(
+                y_t, (H, W), mode='bilinear', align_corners=True)
+        else:
+            # resize target
+            if self.ignore_index:
+                target = F.interpolate(
+                    target.float().unsqueeze(1), (h, w), mode='nearest').squeeze(1)
+
         # [B,C,h,w] -> [B,h,w,C] -> [B*h*w,C]
         y_s = y_s.permute(0, 2, 3, 1).reshape(-1, num_classes)
         y_t = y_t.permute(0, 2, 3, 1).reshape(-1, num_classes)
 
-        # resize target to pred size (use nearest?)
-        target = F.interpolate(
-            target.float().unsqueeze(1), (h, w), mode='nearest').squeeze(1)
         target = target.long().flatten()  # [B*h*w]
 
+        loss = self.forward_flatten(y_s, y_t, target)
+
+        return loss
+
+    def forward_flatten(self, y_s, y_t, target):
         # move target -1 to 0, then use mask
         valid_mask = target != self.ignore_index  # [B*h*w]
         target[~valid_mask] = 0
         num_valid = valid_mask.sum()  # keep as tensor
-        # accum_batch_size = ingore_mask.shape[0]
 
         soft_y_s = y_s / self.T
         soft_y_t = y_t / self.T
@@ -97,18 +114,34 @@ class DKD(nn.Module):
                 / num_valid
                 * (self.T**2)
             )
+
+            _soft_y_s = soft_y_s.detach()
+            _soft_y_t = soft_y_t.detach()
+            logits_info = dict(
+                soft_y_s_max=_soft_y_s.max(),
+                soft_y_s_max_mean=_soft_y_s.max(1)[0].mean(),
+                soft_y_s_min=_soft_y_s.min(),
+                soft_y_s_min_mean=_soft_y_s.min(1)[0].mean(),
+                soft_y_t_max=_soft_y_t.max(),
+                soft_y_t_max_mean=_soft_y_t.max(1)[0].mean(),
+                soft_y_t_min=_soft_y_t.min(),
+                soft_y_t_min_mean=_soft_y_t.min(1)[0].mean(),
+            )
+
         else:
             tckd_loss = 0.0 * y_s.sum()
             nckd_loss = 0.0 * y_s.sum()
 
             num_inf = y_s.new_zeros(())
+            logits_info = {}
 
         self.train_info = dict(
             loss_tckd=tckd_loss.detach(),
             loss_nckd=nckd_loss.detach(),
             num_valid=num_valid.detach(),
             num_inf=num_inf.detach(),
-            entropy=get_entropy(p_s.detach())
+            entropy=get_entropy(p_s.detach()),
+            **logits_info
         )
 
         loss = self.alpha * tckd_loss + self.beta * nckd_loss
