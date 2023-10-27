@@ -270,19 +270,20 @@ class GDKD(nn.Module):
                      self.w1 * low_top_loss +
                      self.w2 * low_other_loss)
 
+
+        entropy = get_entropy(p_s)
+
         train_info.update(dict(
             loss_high=high_loss.detach(),
             loss_low_top=low_top_loss.detach(),
             loss_low_other=low_other_loss.detach(),
             num_inf=num_inf.detach(),
+            entropy=entropy.detach()
             ** logits_info
         ))
 
         if num_valid > 0 and self.entropy_weight is not None:
-            # add entropy reg term (maximize) to avoid extreme predictions
-            entropy = get_entropy(p_s)
             gdkd_loss = gdkd_loss - self.entropy_weight * entropy
-            train_info.update(dict(entropy=entropy.detach()))
 
         return gdkd_loss, p_s, p_t, train_info
 
