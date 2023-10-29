@@ -400,7 +400,7 @@ class Trainer(object):
                 f"Overall validation pixAcc: {pixAcc*100:.3f}, mIoU: {mIoU*100:.3f}")
 
             self.best_metrics['pixAcc'] = max(
-                mIoU, self.best_metrics['pixAcc'])
+                pixAcc, self.best_metrics['pixAcc'])
             if mIoU > self.best_metrics['mIoU']:
                 self.best_metrics['mIoU'] = mIoU
                 save_checkpoint(self.model, self.args,
