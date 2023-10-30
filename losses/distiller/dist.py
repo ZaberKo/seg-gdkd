@@ -3,12 +3,23 @@ import torch.nn.functional as F
 
 from .utils import get_entropy
 
+
 def cosine_similarity(x, y, eps=1e-8):
-    return (x * y).sum(1) / (x.norm(dim=1) * y.norm(dim=1) + eps)
+    return (x * y).sum(dim=-1) / (x.norm(dim=-1) * y.norm(dim=-1) + eps)
 
 
 def pearson_correlation(x, y, eps=1e-8):
-    return cosine_similarity(x - x.mean(1).unsqueeze(1), y - y.mean(1).unsqueeze(1), eps)
+    """
+        computate pearson correlation between x and y at last dim
+        x: Tensor[B, ... , C]
+        y: Tensor[B, ... , C]
+
+        return: Tensor[B, ...]
+    """
+    return cosine_similarity(
+        x - x.mean(dim=-1).unsqueeze(-1),
+        y - y.mean(dim=-1).unsqueeze(-1),
+        eps)
 
 
 def inter_class_relation(y_s, y_t):
@@ -19,15 +30,25 @@ def intra_class_relation(y_s, y_t):
     return inter_class_relation(y_s.transpose(0, 1), y_t.transpose(0, 1))
 
 
+def per_image_intra_class_relation(y_s, y_t, batch_size, num_classes):
+    y_s = y_s.reshape(batch_size, -1, num_classes)  # [B*h*w,C] -> [B, h*w, C]
+    y_t = y_t.reshape(batch_size, -1, num_classes)  # [B*h*w,C] -> [B, h*w, C]
+
+    return intra_class_relation(y_s.transpose(1, 2), y_t.transpose(1, 2))
+
+
 class DIST(nn.Module):
-    def __init__(self, beta=1.0, gamma=1.0, T=1.0, resize_out: bool = False):
+    def __init__(self, beta=1.0, gamma=1.0, T=1.0, 
+                 resize_out: bool = False, per_image_intra=False):
         super(DIST, self).__init__()
         self.beta = beta
         self.gamma = gamma
         self.T = T
-        
-        self.resize_out = resize_out
 
+        self.resize_out = resize_out
+        self.per_image_intra = per_image_intra
+
+        self.meta_info = {}
         self.train_info = {}
 
     def forward(self, y_s, y_t, target):
@@ -36,13 +57,19 @@ class DIST(nn.Module):
         num_classes, h, w = y_s.shape[1:]
         H, W = target.shape[1:]
 
+        self.meta_info=dict(
+            batch_size = y_s.shape[0],
+            num_classes = num_classes,
+            feature_size = (h, w),
+            img_size = (H, W),
+        )
+
         if self.resize_out:
             # resize model out
             y_s = F.interpolate(
                 y_s, (H, W), mode='bilinear', align_corners=True)
             y_t = F.interpolate(
                 y_t, (H, W), mode='bilinear', align_corners=True)
-
 
         # [B,C,h,w] -> [B,h,w,C] -> [B*h*w,C]
         y_s = y_s.permute(0, 2, 3, 1).reshape(-1, num_classes)
@@ -52,14 +79,19 @@ class DIST(nn.Module):
 
         return loss
 
-
     def forward_flatten(self, y_s, y_t, target=None):
         soft_y_s = y_s / self.T
         soft_y_t = y_t / self.T
         p_s = F.softmax(soft_y_s, dim=1)
         p_t = F.softmax(soft_y_t, dim=1)
         inter_loss = inter_class_relation(p_s, p_t)
-        intra_loss = intra_class_relation(p_s, p_t)
+
+        if self.per_image_intra:
+            intra_loss = per_image_intra_class_relation(
+                p_s, p_t, self.meta_info['batch_size'], self.meta_info['num_classes']
+            )
+        else:
+            intra_loss = intra_class_relation(p_s, p_t)
         loss = self.beta * inter_loss + self.gamma * intra_loss
 
         _soft_y_s = soft_y_s.detach()

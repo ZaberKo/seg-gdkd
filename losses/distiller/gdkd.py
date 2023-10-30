@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .utils import kl_div, clamp_probs, get_entropy
-from .dist import intra_class_relation
+from .dist import intra_class_relation, per_image_intra_class_relation
 
 
 def get_masks(logits, k=5, strategy="best"):
@@ -36,7 +36,7 @@ def cat_mask(t, mask1, mask2):
 class GDKD(nn.Module):
     def __init__(self, w0: float = 1.0, w1: float = 1.0, w2: float = 2.0, k: int = 3,
                  T: float = 1.0, mask_magnitude=1000, entropy_weight: float = None,
-                 ignore_index: int = None, ignore_incorrect: bool = False, resize_out: bool = False):
+                 ignore_index: int = None, ignore_incorrect: bool = False, resize_out: bool = False, per_image_intra=False):
         super().__init__()
         self.w0 = w0
         self.w1 = w1
@@ -50,8 +50,10 @@ class GDKD(nn.Module):
         self.ignore_incorrect: bool = ignore_incorrect
         self.resize_out = resize_out
 
+        self.per_image_intra = per_image_intra
         self.dist_intra_weight = None
 
+        self.meta_info = {}
         self.train_info = {}
 
     def forward(self, y_s, y_t, target):
@@ -59,6 +61,13 @@ class GDKD(nn.Module):
 
         num_classes, h, w = y_s.shape[1:]
         H, W = target.shape[1:]
+
+        self.meta_info=dict(
+            batch_size = y_s.shape[0],
+            num_classes = num_classes,
+            feature_size = (h, w),
+            img_size = (H, W),
+        )
 
         if self.resize_out:
             # resize model out
@@ -111,7 +120,12 @@ class GDKD(nn.Module):
         self.train_info.update(train_info)
 
         if self.dist_intra_weight is not None:
-            dist_intra_loss = intra_class_relation(p_s, p_t)
+            if self.per_image_intra:
+                dist_intra_loss = per_image_intra_class_relation(
+                    p_s, p_t, self.meta_info['batch_size'], self.meta_info['num_classes']
+                )
+            else:
+                dist_intra_loss = intra_class_relation(p_s, p_t)
 
             loss = loss + self.dist_intra_weight * dist_intra_loss
 
@@ -269,7 +283,6 @@ class GDKD(nn.Module):
         gdkd_loss = (self.w0 * high_loss +
                      self.w1 * low_top_loss +
                      self.w2 * low_other_loss)
-
 
         entropy = get_entropy(p_s)
 

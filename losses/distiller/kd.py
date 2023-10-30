@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .utils import kl_div, get_entropy
-from .dist import intra_class_relation
+from .dist import intra_class_relation, per_image_intra_class_relation
 
 
 class KD(nn.Module):
@@ -12,7 +12,7 @@ class KD(nn.Module):
     '''
 
     def __init__(self, T: float = 1.0,
-                 ignore_index=None, resize_out: bool = False):
+                 ignore_index=None, resize_out: bool = False,  per_image_intra=False):
         super().__init__()
         self.T = T
 
@@ -20,7 +20,9 @@ class KD(nn.Module):
 
         self.dist_intra_weight = None
         self.resize_out = resize_out
+        self.per_image_intra = per_image_intra
 
+        self.meta_info = {}
         self.train_info = {}
 
     def forward(self, y_s, y_t, target):
@@ -28,6 +30,13 @@ class KD(nn.Module):
 
         num_classes, h, w = y_s.shape[1:]
         H, W = target.shape[1:]
+
+        self.meta_info=dict(
+            batch_size = y_s.shape[0],
+            num_classes = num_classes,
+            feature_size = (h, w),
+            img_size = (H, W),
+        )
 
         if self.resize_out:
             # resize model out
@@ -81,7 +90,12 @@ class KD(nn.Module):
         if self.dist_intra_weight is not None:
             p_s = F.softmax(soft_y_s, dim=1)
             p_t = F.softmax(soft_y_t, dim=1)
-            dist_intra_loss = intra_class_relation(p_s, p_t)
+            if self.per_image_intra:
+                dist_intra_loss = per_image_intra_class_relation(
+                    p_s, p_t, self.meta_info['batch_size'], self.meta_info['num_classes']
+                )
+            else:
+                dist_intra_loss = intra_class_relation(p_s, p_t)
             loss = loss + self.dist_intra_weight * dist_intra_loss
 
             self.train_info.update(dict(

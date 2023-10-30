@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .utils import kl_div, clamp_probs, get_entropy
-from .dist import intra_class_relation
+from .dist import intra_class_relation, per_image_intra_class_relation
 
 
 def _get_gt_mask(logits, target):
@@ -27,17 +27,20 @@ def cat_mask(t, mask1, mask2):
 
 class DKD(nn.Module):
     def __init__(self, alpha: float = 1.0, beta: float = 2.0, T: float = 1.0,
-                 mask_magnitude=1000, resize_out: bool = False):
+                 mask_magnitude=1000, resize_out: bool = False, per_image_intra=False):
         super().__init__()
         self.alpha = alpha
         self.beta = beta
         self.T = T
         self.mask_magnitude = mask_magnitude
 
-        self.dist_intra_weight = None
         self.ignore_index = -1
         self.resize_out = resize_out
+        
+        self.per_image_intra = per_image_intra
+        self.dist_intra_weight = None
 
+        self.meta_info = {}
         self.train_info = {}
 
     def forward(self, y_s, y_t, target):
@@ -45,6 +48,13 @@ class DKD(nn.Module):
 
         num_classes, h, w = y_s.shape[1:]
         H, W = target.shape[1:]
+
+        self.meta_info=dict(
+            batch_size = y_s.shape[0],
+            num_classes = num_classes,
+            feature_size = (h, w),
+            img_size = (H, W),
+        )
 
         if self.resize_out:
             # resize model out
@@ -149,7 +159,12 @@ class DKD(nn.Module):
         loss = self.alpha * tckd_loss + self.beta * nckd_loss
 
         if self.dist_intra_weight is not None:
-            dist_intra_loss = intra_class_relation(p_s, p_t)
+            if self.per_image_intra:
+                dist_intra_loss = per_image_intra_class_relation(
+                    p_s, p_t, self.meta_info['batch_size'], self.meta_info['num_classes']
+                )
+            else:
+                dist_intra_loss = intra_class_relation(p_s, p_t)
 
             loss = loss + self.dist_intra_weight * dist_intra_loss
 
