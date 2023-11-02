@@ -69,7 +69,8 @@ def parse_args():
     parser.add_argument('--max-iterations', type=int, default=40000, metavar='N',
                         help='number of epochs to train (default: 50)')
     parser.add_argument('--lr', type=float, default=0.02, metavar='LR',
-                        help='learning rate (default: 1e-4)')
+                        help='learning rate (default: 0.02)')
+    parser.add_argument('--lr-decay-power', type=float, default=0.9)
     parser.add_argument('--momentum', type=float, default=0.9, metavar='M',
                         help='momentum (default: 0.9)')
     parser.add_argument('--weight-decay', type=float, default=5e-4, metavar='M',
@@ -325,7 +326,7 @@ class Trainer(object):
 
             losses = task_loss + kd_loss
             lr = self.adjust_lr(base_lr=args.lr, iter=iteration-1,
-                                max_iter=args.max_iterations, power=0.9)
+                                max_iter=args.max_iterations, power=args.lr_decay_power)
             self.optimizer.zero_grad()
             losses.backward()
 
